@@ -1,0 +1,10 @@
+{
+  "name": "literati-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Literati MCP server (stdio) for the Claude Code plugin",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}

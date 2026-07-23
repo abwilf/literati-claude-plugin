@@ -1,0 +1,12 @@
+{
+  "name": "literati",
+  "description": "Literati's official Claude Code plugin: agent tools + transcript sync.",
+  "owner": { "name": "Literati" },
+  "plugins": [
+    {
+      "name": "literati",
+      "source": "./",
+      "description": "Use Literati's agent tools (edit, compile, papers) from Claude Code, with transcript sync back to Literati."
+    }
+  ]
+}
