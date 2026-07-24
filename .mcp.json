@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "tools": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/mcp/bundle.mjs"
+      ]
+    }
+  }
+}

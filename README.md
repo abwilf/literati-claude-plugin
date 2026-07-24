@@ -7,19 +7,16 @@ tool is synced back to Literati (deterministic hooks, full transcript), so you
 can `/resume` it later inside the Literati agent. Continuing a synced session
 in Literati forks it — changes never flow back to Claude Code.
 
-## Install (local dev)
-
-Two pieces: the **plugin** (hooks, `/literati:login` command, session context)
-and the **MCP server** (the tools), registered separately so the server shows
-as plain `literati` instead of Claude Code's `plugin:<name>:<server>`
-namespacing for bundled servers.
+## Install
 
 ```bash
-cd claude-plugin/mcp && npm install        # installs @modelcontextprotocol/sdk
-claude plugin marketplace add /path/to/literati/claude-plugin
+claude plugin marketplace add abwilf/literati-claude-plugin
 claude plugin install literati@literati
-claude mcp add --scope user literati -- node /path/to/literati/claude-plugin/mcp/index.mjs
 ```
+
+That's it — the MCP server ships inside the plugin as a self-contained bundle
+(`mcp/bundle.mjs`, no npm install needed). Your first Claude Code session
+after installing greets you and walks you through pairing with a project.
 
 Point the MCP server at a non-default API host (dev default is
 `http://localhost:3000`) with:
@@ -28,9 +25,20 @@ Point the MCP server at a non-default API host (dev default is
 export LITERATI_SERVER_URL=http://localhost:3000
 ```
 
-After editing the plugin: bump `version` in `.claude-plugin/plugin.json`, then
-`claude plugin update literati@literati`. The MCP server needs no update step —
-it runs from this directory.
+## Developing
+
+The plugin's source of truth lives in the Literati monorepo under
+`claude-plugin/`; the standalone repo is published from it via
+`git subtree push --prefix=claude-plugin plugin-origin main`.
+
+After editing the MCP server (`mcp/index.mjs` / `lib/`), rebuild the bundle
+and bump the plugin version so installs pick it up:
+
+```bash
+cd mcp && npm install && npm run build       # regenerates mcp/bundle.mjs
+# bump "version" in .claude-plugin/plugin.json, commit, subtree push, then:
+claude plugin update literati@literati
+```
 
 ## Log in
 

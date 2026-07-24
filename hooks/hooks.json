@@ -13,7 +13,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__(plugin_literati_)?literati__.*",
+        "matcher": "mcp__(plugin_literati_(literati|tools)|literati)__.*",
         "hooks": [
           {
             "type": "command",
