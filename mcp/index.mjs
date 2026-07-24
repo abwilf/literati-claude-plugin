@@ -22,9 +22,9 @@ import {
   getCredentialForDir,
 } from '../lib/credentials.mjs';
 
-// Claude Code launches stdio MCP servers with the session's working
-// directory, so cwd-bound credentials resolve the right project per repo
-// (falling back to the machine-wide default inside getCredentialForDir).
+// Claude Code launches stdio MCP servers (user-scope registrations included)
+// with the session's working directory, so cwd-bound credentials resolve the
+// right project per repo. No binding → logged out (no machine-wide fallback).
 const activeCredential = () => getCredentialForDir(process.cwd());
 
 const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'http://localhost:3000';

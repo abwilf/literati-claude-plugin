@@ -9,12 +9,12 @@ Prereqs: dev stack running (`/dev` — server :3000, web :3010, compilers
 ## 0. Reset to a brand-new user
 
 ```bash
+claude mcp remove --scope user literati 2>/dev/null   # user-scope server registration
 claude plugin uninstall literati 2>/dev/null
 claude plugin marketplace remove literati 2>/dev/null
-claude mcp remove literati 2>/dev/null          # old user-scope server, if present
 mv ~/.literati/credentials.json ~/.literati/credentials.json.bak 2>/dev/null
 rm -f ~/.literati/welcomed
-rm -rf ~/.literati/sessions
+rm -rf ~/.literati/sessions ~/.literati/mcp
 ```
 
 Hard-refresh the browser tab on your project page (new renderer code:
@@ -27,9 +27,10 @@ claude plugin marketplace add abwilf/literati-claude-plugin
 claude plugin install literati@literati
 ```
 
-**Expect:** no other steps — the MCP server ships inside the plugin as a
-self-contained bundle. `claude plugin list` shows literati; from any
-directory `claude` + `/mcp` shows `plugin:literati:tools` connected.
+**Expect:** `claude plugin list` shows literati. The MCP server is NOT yet
+registered (`claude mcp get literati` fails) — that happens in the login flow
+below. The first session's SessionStart hook creates
+`~/.literati/mcp/bundle.mjs` + `manifest.json` (verify after step 2 starts).
 
 ## 2. First-run welcome + login
 
@@ -41,17 +42,25 @@ cd ~/some-scratch-dir && claude
 Say anything ("hi").
 
 **Expect:** Claude opens with a welcome — you just installed Literati, brief
-overview (edit/compile LaTeX, papers, session sync), then asks for your
-project URL. This welcome happens exactly ONCE per machine
+overview (edit/compile LaTeX, papers, session sync), pointing at
+`/literati:login`. This welcome happens exactly ONCE per machine
 (`~/.literati/welcomed` marker); later unpaired sessions just offer login
 when relevant.
 
-Paste your project URL (`http://localhost:3010/project/<id>`):
-1. **Expect:** a "Claude Code pairing request" modal pops on the project page
+Run `/literati:login` (or paste your project URL,
+`http://localhost:3010/project/<id>`):
+1. **Expect:** Claude registers the MCP server via Bash (you approve the
+   `claude mcp add --scope user literati -- node ~/.literati/mcp/bundle.mjs`
+   command; for dev it should include `-e LITERATI_SERVER_URL=…`), then
+   starts pairing via `scripts/login.mjs`.
+2. **Expect:** a "Claude Code pairing request" modal pops on the project page
    in the browser within ~1s. Approve → 8-char code appears.
-2. Paste the code into Claude Code.
-3. **Expect:** "Logged in to <project>" + ~19 tools appear. Also try Deny on
-   a second login to see the denial path.
+3. Paste the code into Claude Code → "Logged in to <project>", and Claude
+   tells you to restart Claude Code to load the tools.
+4. Restart. **Expect:** `/mcp` shows a server named `literati` (NO
+   `plugin:` prefix); ~19 tools namespaced `mcp__literati__*`; a tool call
+   renders as `literati - list_files (MCP)`. Also try Deny on a second login
+   to see the denial path.
 
 **Per-directory scoping:** `cd` to a different directory, run `claude`, ask
 about the project — **expect** logged-out + login offer (credentials bind to
@@ -150,7 +159,8 @@ After a session that used Literati tools:
 |---|---|
 | No pairing modal | Browser tab must be OPEN on that project's page (prompt rides the project WebSocket); hard-refresh after server restarts |
 | No welcome | `rm ~/.literati/welcomed` and start a new session |
-| Tools missing | `/mcp` — is `plugin:literati:tools` connected? `LITERATI_SERVER_URL` set for dev? |
+| Tools missing | `/mcp` — is `literati` connected? `claude mcp get literati` registered and pointing at `~/.literati/mcp/bundle.mjs`? Registered with `-e LITERATI_SERVER_URL` for dev? |
 | No /resume entry | `ls ~/.literati/sessions/` — no marker means no Literati tool ran (PostToolUse matcher) |
 | Compile/tree not refreshing in browser | Hard-refresh the tab (new bundle needed after renderer changes) |
-| Plugin edits not taking effect | Bump version in `.claude-plugin/plugin.json`, rebuild `mcp/bundle.mjs`, `claude plugin update literati@literati`, restart session |
+| Plugin edits not taking effect | Bump version in `.claude-plugin/plugin.json`, rebuild `mcp/bundle.mjs`, `claude plugin update literati@literati`, restart session (the SessionStart hook refreshes `~/.literati/mcp/bundle.mjs` on version change) |
+| Two tool sets (duplicated tools) | A legacy sideload (`--plugin-dir`) or ≤0.5.2 plugin-declared server is active alongside the user-scope one — remove the sideload / update the plugin |

@@ -3,19 +3,84 @@
 // Paired → project name + paper count + current file list (the dynamic
 // counterpart of the static MCP `instructions`). Not paired → tell Claude to
 // offer the login flow. Always exits 0; on any error it emits nothing.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+//
+// Also maintains the stable MCP bundle copy at ~/.literati/mcp/bundle.mjs:
+// the `literati` MCP server is registered at USER scope (not declared by
+// this plugin) so tools display as `literati - <tool> (MCP)` instead of
+// `plugin:literati:tools`. The plugin install dir is versioned/ephemeral, so
+// the registration points at ~/.literati/mcp/bundle.mjs and this hook
+// refreshes that copy whenever the plugin version changes (or the copy is
+// missing). The hook only ever writes under ~/.literati — registering the
+// server (which edits ~/.claude.json) is done by the user-approved
+// /literati:login flow, never silently by a hook.
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, renameSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { getCredentialForDir, LITERATI_DIR } from '../lib/credentials.mjs';
 
 // First-session-after-install marker: the full welcome fires exactly once
 // per machine; later unpaired sessions get the shorter login nudge.
 const WELCOMED_MARKER = join(LITERATI_DIR, 'welcomed');
 
+// Resolved from this script's own location — CLAUDE_PLUGIN_ROOT is not
+// guaranteed in the hook's env.
+const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const MCP_DIR = join(LITERATI_DIR, 'mcp');
+const BUNDLE_DEST = join(MCP_DIR, 'bundle.mjs');
+const MANIFEST_PATH = join(MCP_DIR, 'manifest.json');
+
 function readStdin() {
   try {
     return readFileSync(0, 'utf8');
   } catch {
     return '';
+  }
+}
+
+function pluginVersion() {
+  try {
+    return JSON.parse(readFileSync(join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Copy the bundled MCP server to its stable path when the plugin version
+ * changed or the copy is missing (self-healing if ~/.literati was wiped).
+ * Atomic (tmp + rename) so a concurrently-starting server never loads a
+ * half-written file. Best-effort: any failure leaves the old copy in place. */
+function refreshBundle() {
+  try {
+    const version = pluginVersion();
+    let current = null;
+    try {
+      current = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')).version ?? null;
+    } catch {
+      /* no manifest yet */
+    }
+    if (existsSync(BUNDLE_DEST) && current !== null && current === version) return;
+    mkdirSync(MCP_DIR, { recursive: true });
+    const tmp = `${BUNDLE_DEST}.tmp`;
+    copyFileSync(join(PLUGIN_ROOT, 'mcp', 'bundle.mjs'), tmp);
+    renameSync(tmp, BUNDLE_DEST);
+    writeFileSync(MANIFEST_PATH, JSON.stringify({ version, copiedAt: new Date().toISOString() }) + '\n');
+  } catch {
+    /* best effort */
+  }
+}
+
+/** Is the user-scope `literati` MCP server registered and pointing at the
+ * stable bundle copy? Read-only peek at ~/.claude.json. */
+function mcpServerRegistered() {
+  try {
+    const cfg = JSON.parse(readFileSync(join(homedir(), '.claude.json'), 'utf8'));
+    const entry = cfg?.mcpServers?.literati;
+    if (!entry) return false;
+    const parts = [entry.command, ...(entry.args ?? [])].join(' ');
+    return parts.includes(join('.literati', 'mcp', 'bundle.mjs'));
+  } catch {
+    return false;
   }
 }
 
@@ -47,13 +112,16 @@ const WELCOME_BANNER = `Welcome to the Literati for Claude Code plugin! 🎉
 
 This plugin lets you work on Literati research project files right from Claude Code - read and edit your LaTeX files, compile and debug the PDF, search for and add papers to your bibliography, stage and commit, all synced in real time and viewable by yourself and your collaborators on the web & desktop apps. Claude operates on your behalf - each edit appears as your own. This should feel like using Claude Code on your own filesystem, but have all the benefits of real-time collaboration that Literati offers on the server side.
 
-To get you connected, could you share your *Literati project URL*? You'll find it on the project page in the Literati web app. Once you paste it here, I'll kick off the login (you'll approve it in the web app, then drop a one-time code back here). This will store a directory-specific key (if you move to another directory, you'll either need to re-log in or copy another key).
+To get connected, run /literati:login (or just paste your *Literati project URL* — you'll find it on the project page in the Literati web app). Claude will register the Literati tools, kick off the login (you'll approve it in the web app and drop a one-time code back here), and tell you when to restart. Logins are directory-specific: pair each project directory once.
 
 This message only appears once. Claude can answer any additional questions you have about how to use it.`;
 
 async function main() {
   const payload = JSON.parse(readStdin() || '{}');
+  refreshBundle();
+  const registered = mcpServerRegistered();
   const cred = getCredentialForDir(payload.cwd || process.cwd());
+
   if (!cred) {
     if (!existsSync(WELCOMED_MARKER)) {
       try {
@@ -64,16 +132,34 @@ async function main() {
       }
       emit(
         [
-          'The user just installed the Literati plugin and was shown a one-time welcome banner (by the system, not you) explaining the plugin and asking them to paste their Literati project URL to connect. Do NOT repeat the welcome.',
-          'If their message contains a Literati project URL (or a project id/slug), call the literati_login tool with it and follow its instructions (they approve in the Literati web app, then paste a one-time code here → literati_login_code).',
-          'If they ask questions about the plugin, answer them; otherwise help with whatever they came to do and mention they can connect anytime by sharing their project URL.',
+          'The user just installed the Literati plugin and was shown a one-time welcome banner (by the system, not you) explaining the plugin and pointing them at /literati:login. Do NOT repeat the welcome.',
+          'If their message contains a Literati project URL (or a project id/slug), run the /literati:login flow with it (it registers the user-scope `literati` MCP server and completes pairing via the plugin\'s scripts/login.mjs).',
+          'If they ask questions about the plugin, answer them; otherwise help with whatever they came to do and mention they can connect anytime via /literati:login.',
         ].join('\n'),
         WELCOME_BANNER,
       );
       return;
     }
     emit(
-      'The Literati plugin is installed but this directory is not yet paired with a Literati project, so Literati tools will not work. When the user first asks for anything Literati-related (or at the start of the conversation if they seem to be here for Literati), offer to log them in: ask for their Literati project URL, then call the literati_login tool and follow its instructions.',
+      [
+        'The Literati plugin is installed but this directory is not yet paired with a Literati project, so Literati tools will not work.',
+        registered
+          ? 'When the user first asks for anything Literati-related (or at the start of the conversation if they seem to be here for Literati), offer to log them in: ask for their Literati project URL, then run the /literati:login flow.'
+          : 'The `literati` MCP server is also not registered yet. When the user wants Literati, run the /literati:login flow — it registers the server and pairs this directory.',
+      ].join('\n'),
+    );
+    return;
+  }
+
+  if (!registered) {
+    // Paired but no user-scope registration: an upgrader from plugin ≤0.5.2
+    // (which declared the MCP server inside the plugin) or a wiped
+    // ~/.claude.json. One /literati:login run fixes it (pairing is kept).
+    emit(
+      [
+        `This directory is paired with the Literati project "${cred.projectName}", but the Literati MCP server is not registered (the plugin was updated: its MCP server now registers at user scope as \`literati\` instead of being plugin-declared).`,
+        'Tell the user to run /literati:login to finish the one-command migration (their pairing is kept), then restart Claude Code to load the tools.',
+      ].join('\n'),
     );
     return;
   }
