@@ -1,6 +1,6 @@
 {
   "name": "literati",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Use Literati's agent tools (edit, compile, papers) from Claude Code, with transcript sync back to Literati so sessions can be resumed there.",
   "author": { "name": "Literati" }
 }

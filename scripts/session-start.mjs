@@ -85,6 +85,10 @@ async function main() {
   emit(lines.join('\n'));
 }
 
-main()
-  .catch(() => {})
-  .finally(() => process.exit(0));
+// No process.exit(): stdout writes to a pipe are ASYNC and exit() drops the
+// unflushed buffer — Claude Code would receive truncated/empty hook output
+// (welcome context silently lost). Natural termination drains stdout; all
+// error paths are caught so the exit code is 0 either way.
+main().catch(() => {
+  process.exitCode = 0;
+});

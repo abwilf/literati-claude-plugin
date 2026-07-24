@@ -73,6 +73,9 @@ async function main() {
   }
 }
 
-main()
-  .catch((err) => console.error(`[literati] sync hook error: ${err.message}`))
-  .finally(() => process.exit(0));
+// No process.exit() — see session-start.mjs: exit() can truncate pipe
+// output mid-flush. Errors are caught, so natural termination exits 0.
+main().catch((err) => {
+  console.error(`[literati] sync hook error: ${err.message}`);
+  process.exitCode = 0;
+});
