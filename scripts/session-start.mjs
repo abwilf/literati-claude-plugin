@@ -32,13 +32,24 @@ async function fetchProjectContext(cred) {
   }
 }
 
-function emit(additionalContext) {
+function emit(additionalContext, systemMessage) {
   process.stdout.write(
     JSON.stringify({
+      ...(systemMessage ? { systemMessage } : {}),
       hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
     }),
   );
 }
+
+// First-run banner: shown to the USER directly (systemMessage renders in the
+// UI) — not spoken by the model.
+const WELCOME_BANNER = `Welcome to the Literati for Claude Code plugin! 🎉
+
+This plugin lets you work on Literati research project files right from Claude Code - read and edit your LaTeX files, compile and debug the PDF, search for and add papers to your bibliography, stage and commit, all synced in real time and viewable by yourself and your collaborators on the web & desktop apps. Claude operates on your behalf - each edit appears as your own. This should feel like using Claude Code on your own filesystem, but have all the benefits of real-time collaboration that Literati offers on the server side.
+
+To get you connected, could you share your *Literati project URL*? You'll find it on the project page in the Literati web app. Once you paste it here, I'll kick off the login (you'll approve it in the web app, then drop a one-time code back here). This will store a directory-specific key (if you move to another directory, you'll either need to re-log in or copy another key).
+
+This message only appears once. Claude can answer any additional questions you have about how to use it.`;
 
 async function main() {
   const payload = JSON.parse(readStdin() || '{}');
@@ -53,12 +64,11 @@ async function main() {
       }
       emit(
         [
-          'The user has JUST INSTALLED the Literati plugin and this is their first session with it. Open your very first reply with a short, warm welcome (before addressing anything else they said):',
-          '1. Welcome them to Literati for Claude Code.',
-          "2. One-breath overview of what it does: work on a Literati research project's files from Claude Code — read/edit LaTeX sources, compile and debug the PDF, search and add papers to the bibliography, and every session syncs back to Literati so they can resume it in the app.",
-          '3. Then get them connected: ask for their Literati project URL (from the project page in the Literati web app). When they provide it, call the literati_login tool and follow its instructions (they approve in the web app, then paste a one-time code here).',
-          'Keep it to a few friendly sentences, not a wall of text. If they clearly came to do something unrelated to Literati, keep the welcome to one line and offer to set up later.',
+          'The user just installed the Literati plugin and was shown a one-time welcome banner (by the system, not you) explaining the plugin and asking them to paste their Literati project URL to connect. Do NOT repeat the welcome.',
+          'If their message contains a Literati project URL (or a project id/slug), call the literati_login tool with it and follow its instructions (they approve in the Literati web app, then paste a one-time code here → literati_login_code).',
+          'If they ask questions about the plugin, answer them; otherwise help with whatever they came to do and mention they can connect anytime by sharing their project URL.',
         ].join('\n'),
+        WELCOME_BANNER,
       );
       return;
     }
