@@ -15511,7 +15511,7 @@ function getCredentialForDir(dir) {
 
 // index.mjs
 var activeCredential = () => getCredentialForDir(process.cwd());
-var DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || "http://localhost:3000";
+var DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || "https://api.literati.ai";
 var EXECUTE_TIMEOUT_MS = 9 * 6e4;
 var LOGIN_TOOL = {
   name: "literati_login",

@@ -27,16 +27,53 @@ the SessionStart hook keeps that bundle copy up to date) and pairs the current
 directory with your project. Restart Claude Code once afterwards to load the
 tools.
 
-Point the MCP server at a non-default API host (dev default is
-`http://localhost:3000`) by registering with an env var:
+No configuration is needed — the plugin talks to `https://api.literati.ai` by
+default.
+
+## Local development
+
+To pair against a server running on your own machine, set
+`LITERATI_SERVER_URL` **before pairing**:
 
 ```bash
+LITERATI_SERVER_URL=http://localhost:3000 claude
+```
+
+…then run `/literati:login` in that session. The env var is inherited by the
+stdio MCP server, so this needs no change to your registration.
+
+If you prefer it permanent, re-register with the variable baked in:
+
+```bash
+claude mcp remove literati -s user
 claude mcp add --scope user -e LITERATI_SERVER_URL=http://localhost:3000 literati -- node ~/.literati/mcp/bundle.mjs
 ```
+
+**The host only matters at pairing time.** Once a directory is paired, its
+server URL is stored per-directory in `~/.literati/credentials.json`, and that
+stored value wins from then on. So:
+
+- An already-paired directory keeps using the host it was paired against, with
+  or without the env var.
+- A dev-paired directory and a production-paired directory work side by side
+  in the same Claude Code installation.
+- To repoint an existing directory, pair it again with the env var set.
+
+Check what a directory is bound to:
+
+```bash
+node -e "const j=require(require('os').homedir()+'/.literati/credentials.json');console.log(j.directories)"
+```
+
+Each entry maps a directory to a `<serverUrl>|<collectionId>` key. If a
+directory you meant to pair against localhost shows
+`https://api.literati.ai|…`, the env var did not reach the server — re-pair
+with it set.
 
 ## Log in
 
 Run `/literati:login` (or just paste your project URL — it looks like
+`https://app.literati.ai/project/<id>`, or
 `http://localhost:3010/project/<id>` in dev):
 
 1. Give Claude your project URL.

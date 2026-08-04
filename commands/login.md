@@ -13,7 +13,7 @@ Run `claude mcp get literati` in Bash.
   1. Check the bundle exists: `ls ~/.literati/mcp/bundle.mjs`. If missing (the SessionStart hook normally maintains it), copy it from the plugin: `mkdir -p ~/.literati/mcp && cp "${CLAUDE_PLUGIN_ROOT}/mcp/bundle.mjs" ~/.literati/mcp/bundle.mjs`
   2. Register it at user scope:
      `claude mcp add --scope user literati -- node ~/.literati/mcp/bundle.mjs`
-     (For development against a non-default server, add `-e LITERATI_SERVER_URL=http://localhost:3000` before `literati`.)
+     (Defaults to `https://api.literati.ai`. For local development add `-e LITERATI_SERVER_URL=http://localhost:3000` before `literati`, or launch as `LITERATI_SERVER_URL=http://localhost:3000 claude` — the stdio server inherits it. The host is only used when a directory is FIRST paired; afterwards it comes from `~/.literati/credentials.json`.)
   3. Note for step 3: newly registered servers load on the next session.
 
 ## 2. Pair this directory with a project

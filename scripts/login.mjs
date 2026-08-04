@@ -18,7 +18,10 @@ import { readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { addProjectCredential, getCredentialForDir, LITERATI_DIR } from '../lib/credentials.mjs';
 
-const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'http://localhost:3000';
+// Must match mcp/index.mjs — this is the host a NEW pairing is created
+// against. Production by default so a fresh install works unconfigured;
+// set LITERATI_SERVER_URL for local development (see README.md).
+const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'https://api.literati.ai';
 const PENDING_PATH = join(LITERATI_DIR, 'pairing-pending.json');
 
 function fail(msg) {
