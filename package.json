@@ -1,0 +1,7 @@
+{
+  "name": "literati-claude-plugin",
+  "private": true,
+  "scripts": {
+    "test": "node --test scripts/*.test.mjs"
+  }
+}

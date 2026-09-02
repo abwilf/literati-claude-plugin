@@ -70,11 +70,18 @@ function refreshBundle() {
   }
 }
 
+/** Claude Code's user config file — the one `claude mcp add --scope user`
+ * writes. Honour CLAUDE_CONFIG_DIR the way Claude Code does, else the hook
+ * reads the real ~/.claude.json while an isolated config has no server. */
+function claudeConfigPath(env = process.env) {
+  return env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, '.claude.json') : join(homedir(), '.claude.json');
+}
+
 /** Is the user-scope `literati` MCP server registered and pointing at the
- * stable bundle copy? Read-only peek at ~/.claude.json. */
+ * stable bundle copy? Read-only peek at the Claude Code user config. */
 function mcpServerRegistered() {
   try {
-    const cfg = JSON.parse(readFileSync(join(homedir(), '.claude.json'), 'utf8'));
+    const cfg = JSON.parse(readFileSync(claudeConfigPath(), 'utf8'));
     const entry = cfg?.mcpServers?.literati;
     if (!entry) return false;
     const parts = [entry.command, ...(entry.args ?? [])].join(' ');
@@ -153,12 +160,14 @@ async function main() {
 
   if (!registered) {
     // Paired but no user-scope registration: an upgrader from plugin ≤0.5.2
-    // (which declared the MCP server inside the plugin) or a wiped
-    // ~/.claude.json. One /literati:login run fixes it (pairing is kept).
+    // (which declared the MCP server inside the plugin), a wiped
+    // ~/.claude.json, or a different CLAUDE_CONFIG_DIR. One /literati:login
+    // run fixes it (pairing is kept). No tools are loaded in this session, so
+    // the model must not be told they are.
     emit(
       [
-        `This directory is paired with the Literati project "${cred.projectName}", but the Literati MCP server is not registered (the plugin was updated: its MCP server now registers at user scope as \`literati\` instead of being plugin-declared).`,
-        'Tell the user to run /literati:login to finish the one-command migration (their pairing is kept), then restart Claude Code to load the tools.',
+        `This directory is paired with the Literati project "${cred.projectName}", but the user-scope \`literati\` MCP server is not registered in this Claude Code config, so NO \`mcp__literati__*\` tools are available in this session — do not look for or call them.`,
+        'When the user wants Literati, run the /literati:login flow: its first step registers the server (the pairing is kept), then tell the user to restart Claude Code to load the tools.',
       ].join('\n'),
     );
     return;

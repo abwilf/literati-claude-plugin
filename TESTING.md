@@ -51,7 +51,8 @@ Run `/literati:login` (or paste your project URL,
 `http://localhost:3010/project/<id>`):
 1. **Expect:** Claude registers the MCP server via Bash (you approve the
    `claude mcp add --scope user literati -- node ~/.literati/mcp/bundle.mjs`
-   command; for dev it should include `-e LITERATI_SERVER_URL=…`), then
+   command; for dev it should include `-e LITERATI_SERVER_URL=…` after
+   `literati`), then
    starts pairing via `scripts/login.mjs`.
 2. **Expect:** a "Claude Code pairing request" modal pops on the project page
    in the browser within ~1s. Approve → 8-char code appears.

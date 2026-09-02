@@ -31,7 +31,7 @@ Point the MCP server at a non-default API host (dev default is
 `http://localhost:3000`) by registering with an env var:
 
 ```bash
-claude mcp add --scope user -e LITERATI_SERVER_URL=http://localhost:3000 literati -- node ~/.literati/mcp/bundle.mjs
+claude mcp add --scope user literati -e LITERATI_SERVER_URL=http://localhost:3000 -- node ~/.literati/mcp/bundle.mjs
 ```
 
 ## Log in
@@ -80,7 +80,7 @@ SessionStart hook to refresh the stable bundle copy at
 For development, you can point the registration at your checkout directly:
 
 ```bash
-claude mcp add --scope user -e LITERATI_SERVER_URL=http://localhost:3000 literati -- node <your-checkout>/mcp/bundle.mjs
+claude mcp add --scope user literati -e LITERATI_SERVER_URL=http://localhost:3000 -- node <your-checkout>/mcp/bundle.mjs
 ```
 
 ## How syncing works
