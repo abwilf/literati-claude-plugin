@@ -45,22 +45,24 @@ If not paired:
   3. **Then** open the project page in their browser so they don't have to click anything — only after the start command succeeded, since the approval prompt only appears once the request exists. Use the platform's opener with the URL quoted (`open` on macOS, `xdg-open` on Linux, `start ""` on Windows), e.g. `open "<project-url>"`. Skip this if they gave a bare project id rather than a URL, or if the opener fails — it is a convenience, never a reason to stop.
   4. Relay the instructions either way: they approve the "Claude Code pairing request" prompt on that page and are shown a one-time code.
   5. Ask for the code, then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/login.mjs" code <one-time-code>`.
-  6. **If you cannot receive the code in this session** — you are a one-shot
-     non-interactive run (`claude -p ...`), so the session ends with your reply
-     and there is no prompt for them to type into — do NOT ask them to paste it
-     here. End your message with the exact command to run instead, on its own
-     line and with the placeholder obvious:
+  6. **Always end by giving them BOTH ways to deliver the code** — you usually
+     cannot tell whether this session can receive a reply (a `claude -p ...`
+     run ends with your message and has no prompt to type into), so never
+     offer only one. Close with something like:
 
-     ```bash
-     claude "/literati:login your_code_here"
-     ```
+     > Approve the request on the project page and copy the one-time code, then
+     > either paste it here, or — if this session has ended — run:
+     >
+     > ```bash
+     > claude "/literati:login YOUR_CODE_HERE"
+     > ```
+     >
+     > from this same directory.
 
-     Tell them plainly: approve the request in the browser, copy the one-time
-     code, and run that command with the code in place of `your_code_here`,
-     from this same directory. Do NOT tell them to use `claude -c`: a `-p`
-     session is not resumed by `--continue`, so the next session would have no
-     idea a pairing was in flight. Re-invoking this command is what carries the
-     state, because the pending request lives on disk.
+     Never say only "paste it here": if the session has already ended, that
+     leaves them stuck with a code and nowhere to put it. And do NOT suggest
+     `claude -c`, which does not resume a `-p` session — re-invoking this
+     command is what carries the state, since the pending request lives on disk.
 
 ## 3. Finish
 
