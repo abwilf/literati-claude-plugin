@@ -20,6 +20,9 @@ import {
 import {
   addProjectCredential,
   getCredentialForDir,
+  savePendingPairing,
+  loadPendingPairing,
+  clearPendingPairing,
 } from '../lib/credentials.mjs';
 
 // Claude Code launches stdio MCP servers (user-scope registrations included)
@@ -176,6 +179,7 @@ async function handleLogin(args) {
   }
   const body = await res.json();
   pendingPairing = { requestId: body.requestId, serverUrl };
+  savePendingPairing(pendingPairing);
   return text(
     [
       'Pairing request sent.',
@@ -192,13 +196,17 @@ async function handleLogin(args) {
 async function handleLoginCode(args) {
   const code = String(args?.code ?? '').trim();
   if (!code) return text('code is required.', true);
-  if (!pendingPairing) {
+  // A pairing started by scripts/login.mjs (or in an earlier session) lives on
+  // disk, not in this process's memory — fall back to it so the first-install
+  // flow can be finished here rather than started over.
+  const pending = pendingPairing ?? loadPendingPairing();
+  if (!pending) {
     return text('No pairing in progress — call literati_login with the project URL first.', true);
   }
   let res;
   try {
     res = await fetch(
-      `${pendingPairing.serverUrl}/cli/pairing/requests/${pendingPairing.requestId}/exchange`,
+      `${pending.serverUrl}/cli/pairing/requests/${pending.requestId}/exchange`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -224,7 +232,7 @@ async function handleLoginCode(args) {
   // here (or in a subdirectory) resolves this project automatically.
   addProjectCredential(
     {
-      serverUrl: pendingPairing.serverUrl,
+      serverUrl: pending.serverUrl,
       token: body.token,
       collectionId: body.collectionId,
       workspaceId: body.workspaceId,
@@ -235,6 +243,7 @@ async function handleLoginCode(args) {
     process.cwd(),
   );
   pendingPairing = null;
+  clearPendingPairing();
   remoteTools = await fetchRemoteTools();
   try {
     await server.sendToolListChanged();

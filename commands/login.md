@@ -24,7 +24,7 @@ If not paired:
 
 - If the `mcp__literati__*` tools are already available in this session, prefer them: call `literati_login` with the project URL, then `literati_login_code` with the one-time code (they handle the same flow in-session). After `literati_login` returns, open the project page for them the same way (`open "<project-url>"` on macOS, `xdg-open` on Linux, `start ""` on Windows).
 - Otherwise use the pairing CLI:
-  1. Ask the user for their Literati project URL (looks like `https://…/project/<id>`; a bare project id also works). Use `$ARGUMENTS` if provided.
+  1. Ask the user for their Literati project URL (looks like `https://literati.ai/projects/<id>`; a bare project id also works). Use `$ARGUMENTS` if provided.
   2. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/login.mjs" start <project-url>`.
   3. **Then** open the project page in their browser so they don't have to click anything — only after the start command succeeded, since the approval prompt only appears once the request exists. Use the platform's opener with the URL quoted (`open` on macOS, `xdg-open` on Linux, `start ""` on Windows), e.g. `open "<project-url>"`. Skip this if they gave a bare project id rather than a URL, or if the opener fails — it is a convenience, never a reason to stop.
   4. Relay the instructions either way: they approve the "Claude Code pairing request" prompt on that page and are shown a one-time code.

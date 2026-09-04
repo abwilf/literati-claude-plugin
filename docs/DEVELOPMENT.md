@@ -56,7 +56,7 @@ the env var did not reach the server — re-pair with it set.
 ## Log in
 
 Run `/literati:login` (or just paste your project URL — it looks like
-`https://app.literati.ai/project/<id>`, or `http://localhost:3010/project/<id>`
+`https://literati.ai/projects/<id>`, or `http://localhost:3010/project/<id>`
 in dev; a bare project id also works):
 
 1. Give Claude your project URL.

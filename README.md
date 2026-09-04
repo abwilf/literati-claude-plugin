@@ -8,7 +8,7 @@ the project's server-side documents.
 **1.** Install: replace `your_project_id` below from your Literati project URL
 
 ```bash
-claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati && claude -p "/literati:login https://app.literati.ai/project/your_project_id" --allowedTools "Bash"
+claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati && claude -p "/literati:login https://literati.ai/projects/your_project_id" --allowedTools "Bash"
 ```
 
 **2.** Approve the pairing request on your project page, then paste the one-time code it shows you:

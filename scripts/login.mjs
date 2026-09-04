@@ -14,15 +14,18 @@
 //   node login.mjs start <project-url-or-id>
 //   node login.mjs code <one-time-code>
 import os from 'node:os';
-import { readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { addProjectCredential, getCredentialForDir, LITERATI_DIR } from '../lib/credentials.mjs';
+import {
+  addProjectCredential,
+  getCredentialForDir,
+  savePendingPairing,
+  loadPendingPairing,
+  clearPendingPairing,
+} from '../lib/credentials.mjs';
 
 // Must match mcp/index.mjs — this is the host a NEW pairing is created
 // against. Production by default so a fresh install works unconfigured;
 // set LITERATI_SERVER_URL for local development (see README.md).
 const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'https://api.literati.ai';
-const PENDING_PATH = join(LITERATI_DIR, 'pairing-pending.json');
 
 function fail(msg) {
   console.error(msg);
@@ -49,11 +52,7 @@ async function start(projectUrl) {
   }
   if (!res.ok) return fail(`Pairing request failed: HTTP ${res.status}`);
   const body = await res.json();
-  mkdirSync(LITERATI_DIR, { recursive: true });
-  writeFileSync(
-    PENDING_PATH,
-    JSON.stringify({ requestId: body.requestId, serverUrl, createdAt: new Date().toISOString() }),
-  );
+  savePendingPairing({ requestId: body.requestId, serverUrl });
   console.log(
     [
       'Pairing request sent. Tell the user to:',
@@ -68,10 +67,8 @@ async function start(projectUrl) {
 
 async function code(oneTimeCode) {
   if (!oneTimeCode) return fail('Usage: login.mjs code <one-time-code>');
-  let pending;
-  try {
-    pending = JSON.parse(readFileSync(PENDING_PATH, 'utf8'));
-  } catch {
+  const pending = loadPendingPairing();
+  if (!pending) {
     return fail('No pairing in progress — run `login.mjs start <project-url>` first.');
   }
   let res;
@@ -107,11 +104,7 @@ async function code(oneTimeCode) {
     },
     process.cwd(),
   );
-  try {
-    unlinkSync(PENDING_PATH);
-  } catch {
-    /* best effort */
-  }
+  clearPendingPairing();
   console.log(
     `Logged in to Literati project "${body.projectName}". This directory (and subdirectories) now resolve that project's credentials.`,
   );

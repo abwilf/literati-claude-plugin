@@ -15460,12 +15460,34 @@ var StdioServerTransport = class {
 };
 
 // ../lib/credentials.mjs
-import { readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 var LITERATI_DIR = join(homedir(), ".literati");
 var CREDENTIALS_PATH = join(LITERATI_DIR, "credentials.json");
 var SESSIONS_DIR = join(LITERATI_DIR, "sessions");
+var PENDING_PATH = join(LITERATI_DIR, "pairing-pending.json");
+function savePendingPairing({ requestId, serverUrl }) {
+  mkdirSync(LITERATI_DIR, { recursive: true });
+  writeFileSync(
+    PENDING_PATH,
+    JSON.stringify({ requestId, serverUrl, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) + "\n"
+  );
+}
+function loadPendingPairing() {
+  try {
+    const p = JSON.parse(readFileSync(PENDING_PATH, "utf8"));
+    return p?.requestId && p?.serverUrl ? p : null;
+  } catch {
+    return null;
+  }
+}
+function clearPendingPairing() {
+  try {
+    unlinkSync(PENDING_PATH);
+  } catch {
+  }
+}
 function projectKey(serverUrl, collectionId) {
   return `${serverUrl}|${collectionId}`;
 }
@@ -15627,6 +15649,7 @@ async function handleLogin(args) {
   }
   const body = await res.json();
   pendingPairing = { requestId: body.requestId, serverUrl };
+  savePendingPairing(pendingPairing);
   return text(
     [
       "Pairing request sent.",
@@ -15642,13 +15665,14 @@ async function handleLogin(args) {
 async function handleLoginCode(args) {
   const code = String(args?.code ?? "").trim();
   if (!code) return text("code is required.", true);
-  if (!pendingPairing) {
+  const pending = pendingPairing ?? loadPendingPairing();
+  if (!pending) {
     return text("No pairing in progress \u2014 call literati_login with the project URL first.", true);
   }
   let res;
   try {
     res = await fetch(
-      `${pendingPairing.serverUrl}/cli/pairing/requests/${pendingPairing.requestId}/exchange`,
+      `${pending.serverUrl}/cli/pairing/requests/${pending.requestId}/exchange`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -15672,7 +15696,7 @@ async function handleLoginCode(args) {
   const body = await res.json();
   addProjectCredential(
     {
-      serverUrl: pendingPairing.serverUrl,
+      serverUrl: pending.serverUrl,
       token: body.token,
       collectionId: body.collectionId,
       workspaceId: body.workspaceId,
@@ -15683,6 +15707,7 @@ async function handleLoginCode(args) {
     process.cwd()
   );
   pendingPairing = null;
+  clearPendingPairing();
   remoteTools = await fetchRemoteTools();
   try {
     await server.sendToolListChanged();
