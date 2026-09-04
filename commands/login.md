@@ -45,22 +45,32 @@ If not paired:
   3. **Then** open the project page in their browser so they don't have to click anything — only after the start command succeeded, since the approval prompt only appears once the request exists. Use the platform's opener with the URL quoted (`open` on macOS, `xdg-open` on Linux, `start ""` on Windows), e.g. `open "<project-url>"`. Skip this if they gave a bare project id rather than a URL, or if the opener fails — it is a convenience, never a reason to stop.
   4. Relay the instructions either way: they approve the "Claude Code pairing request" prompt on that page and are shown a one-time code.
   5. Ask for the code, then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/login.mjs" code <one-time-code>`.
-  6. **Always end with the command that delivers the code.** You usually cannot
-     tell whether this session can receive a reply (a `claude -p ...` run ends
-     with your message and has no prompt to type into), so never leave them
-     with only "paste it here". Close with a numbered step worded like:
+  6. **Close with exactly two numbered steps, and end on the command line.**
+     While you are waiting for a code the pairing is NOT done, so this message
+     must not contain a capability list, a preview of what you will be able to
+     do, or restart advice — all of that belongs in section 3 and only after
+     pairing actually completes. Nothing goes after the command. Word it like:
 
-         3. Paste the code into Claude:
+         1. Approve the "Claude Code pairing request" prompt on that page.
+         2. Copy the one-time code and paste it into your next Claude session:
 
             claude "/literati:login YOUR_CODE_HERE"
 
-     Show that command as a plain indented line — do NOT wrap it in a fenced
-     ```bash block. Mention the directory only if it differs from where they
-     are now. And do NOT suggest `claude -c`, which does not resume a `-p`
-     session — re-invoking this command is what carries the state, since the
+     Number them 1 and 2 — opening the browser is something you did, not a step
+     for them, so do not number it and do not leave a gap. Show the command as a
+     plain indented line: no fenced ```bash block. If you want to mention the
+     10-minute expiry, put it BEFORE the steps, never after the command.
+     Mention the directory only if it differs from where they are now. Do NOT
+     suggest `claude -c` — it does not resume a `-p` session, so the pairing
+     state would be lost; re-invoking this command is what carries it, since the
      pending request lives on disk.
 
 ## 3. Finish — welcome them to the project
+
+**Precondition: the pairing has actually COMPLETED** — the code was exchanged
+and the credential written. Never run any of this while a pairing request is
+still outstanding and you are waiting for a code. Until then the user gets the
+two numbered steps above and nothing more.
 
 Once the pairing succeeds, don't just report success — open the project for
 them. Lead with the project name and a party emoji:
@@ -86,9 +96,9 @@ Close by asking what they're working on.
 Keep the whole thing tight: a greeting, the files, about five capability lines.
 Do not dump the raw tool list or enumerate every tool name.
 
-- If the MCP server was newly registered in step 1, the tools are NOT loaded in
-  this session. Still give the welcome and the capability summary, but skip the
-  file list, tell the user to restart Claude Code (or try `/mcp` → reconnect),
-  and offer to show them the project files as soon as it comes back.
+- If the pairing completed but the MCP server was only registered moments ago,
+  its tools are not loaded in this session: give the welcome and the capability
+  summary, skip the file list, tell the user to restart Claude Code (or try
+  `/mcp` → reconnect), and offer to show the project files once it is back.
 - If tools still don't appear after a restart, re-run `claude mcp get literati`
   to verify the registration.
