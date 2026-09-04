@@ -14,6 +14,7 @@
 // server (which edits ~/.claude.json) is done by the user-approved
 // /literati:login flow, never silently by a hook.
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, renameSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -46,25 +47,41 @@ function pluginVersion() {
   }
 }
 
-/** Copy the bundled MCP server to its stable path when the plugin version
- * changed or the copy is missing (self-healing if ~/.literati was wiped).
- * Atomic (tmp + rename) so a concurrently-starting server never loads a
- * half-written file. Best-effort: any failure leaves the old copy in place. */
+function sha256(path) {
+  try {
+    return createHash('sha256').update(readFileSync(path)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/** Copy the bundled MCP server to its stable path when its CONTENT differs from
+ * the copy we last made (or the copy is missing — self-healing if ~/.literati
+ * was wiped). Compared by hash rather than plugin version: a maintainer who
+ * rebuilds the bundle without bumping the version would otherwise keep loading
+ * the stale copy with no indication. Atomic (tmp + rename) so a concurrently
+ * starting server never loads a half-written file. Best-effort: any failure
+ * leaves the old copy in place. */
 function refreshBundle() {
   try {
-    const version = pluginVersion();
+    const src = join(PLUGIN_ROOT, 'mcp', 'bundle.mjs');
+    const srcHash = sha256(src);
+    if (!srcHash) return;
     let current = null;
     try {
-      current = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')).version ?? null;
+      current = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')).sha256 ?? null;
     } catch {
-      /* no manifest yet */
+      /* no manifest yet, or one written before hashes were recorded */
     }
-    if (existsSync(BUNDLE_DEST) && current !== null && current === version) return;
+    if (existsSync(BUNDLE_DEST) && current === srcHash) return;
     mkdirSync(MCP_DIR, { recursive: true });
     const tmp = `${BUNDLE_DEST}.tmp`;
-    copyFileSync(join(PLUGIN_ROOT, 'mcp', 'bundle.mjs'), tmp);
+    copyFileSync(src, tmp);
     renameSync(tmp, BUNDLE_DEST);
-    writeFileSync(MANIFEST_PATH, JSON.stringify({ version, copiedAt: new Date().toISOString() }) + '\n');
+    writeFileSync(
+      MANIFEST_PATH,
+      JSON.stringify({ version: pluginVersion(), sha256: srcHash, copiedAt: new Date().toISOString() }) + '\n',
+    );
   } catch {
     /* best effort */
   }
@@ -105,11 +122,17 @@ async function fetchProjectContext(cred) {
 }
 
 function emit(additionalContext, systemMessage) {
+  // The write callback fires once the data has been handed to the OS, so
+  // exiting from it cannot truncate the pipe the way a bare process.exit()
+  // would. Exiting explicitly matters: a fetch aborted by its timeout leaves a
+  // socket holding the event loop open for ~10s (undici's connect timeout),
+  // which Claude Code would spend waiting on this hook at every session start.
   process.stdout.write(
     JSON.stringify({
       ...(systemMessage ? { systemMessage } : {}),
       hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
     }),
+    () => process.exit(0),
   );
 }
 

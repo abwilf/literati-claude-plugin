@@ -15467,17 +15467,38 @@ var LITERATI_DIR = join(homedir(), ".literati");
 var CREDENTIALS_PATH = join(LITERATI_DIR, "credentials.json");
 var SESSIONS_DIR = join(LITERATI_DIR, "sessions");
 var PENDING_PATH = join(LITERATI_DIR, "pairing-pending.json");
-function savePendingPairing({ requestId, serverUrl }) {
-  mkdirSync(LITERATI_DIR, { recursive: true });
-  writeFileSync(
-    PENDING_PATH,
-    JSON.stringify({ requestId, serverUrl, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) + "\n"
-  );
+var PAIRING_TTL_MS = 10 * 60 * 1e3;
+function isPairingFresh(entry) {
+  if (!entry?.requestId || !entry?.serverUrl) return false;
+  const started = Date.parse(entry.createdAt ?? "");
+  if (Number.isNaN(started)) return true;
+  return Date.now() - started < PAIRING_TTL_MS;
+}
+function savePendingPairing({ requestId, serverUrl, cwd }) {
+  try {
+    mkdirSync(LITERATI_DIR, { recursive: true });
+    writeFileSync(
+      PENDING_PATH,
+      JSON.stringify({
+        requestId,
+        serverUrl,
+        cwd: cwd ? resolve(cwd) : null,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      }) + "\n"
+    );
+    try {
+      chmodSync(PENDING_PATH, 384);
+    } catch {
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 function loadPendingPairing() {
   try {
-    const p = JSON.parse(readFileSync(PENDING_PATH, "utf8"));
-    return p?.requestId && p?.serverUrl ? p : null;
+    const entry = JSON.parse(readFileSync(PENDING_PATH, "utf8"));
+    return isPairingFresh(entry) ? entry : null;
   } catch {
     return null;
   }
@@ -15543,7 +15564,7 @@ var LOGIN_TOOL = {
     properties: {
       project_url: {
         type: "string",
-        description: "The Literati project URL (https://\u2026/project/<id>) or bare project id/slug."
+        description: "The Literati project URL (https://literati.ai/projects/<id>) or bare project id/slug."
       }
     },
     required: ["project_url"],
@@ -15648,7 +15669,7 @@ async function handleLogin(args) {
     return text(`Pairing request failed: HTTP ${res.status}`, true);
   }
   const body = await res.json();
-  pendingPairing = { requestId: body.requestId, serverUrl };
+  pendingPairing = { requestId: body.requestId, serverUrl, cwd: process.cwd(), createdAt: (/* @__PURE__ */ new Date()).toISOString() };
   savePendingPairing(pendingPairing);
   return text(
     [
@@ -15665,7 +15686,7 @@ async function handleLogin(args) {
 async function handleLoginCode(args) {
   const code = String(args?.code ?? "").trim();
   if (!code) return text("code is required.", true);
-  const pending = pendingPairing ?? loadPendingPairing();
+  const pending = loadPendingPairing() ?? (isPairingFresh(pendingPairing) ? pendingPairing : null);
   if (!pending) {
     return text("No pairing in progress \u2014 call literati_login with the project URL first.", true);
   }
@@ -15688,6 +15709,8 @@ async function handleLoginCode(args) {
     if (body2?.code === "PAIRING_INVALID_CODE") {
       return text("That code is not correct \u2014 ask the user to re-check it and try again.", true);
     }
+    pendingPairing = null;
+    clearPendingPairing();
     return text(
       "Pairing could not be completed (expired, denied, or too many attempts). Start over with literati_login.",
       true
@@ -15704,7 +15727,7 @@ async function handleLoginCode(args) {
       projectSlug: body.projectSlug,
       projectName: body.projectName
     },
-    process.cwd()
+    pending.cwd ?? process.cwd()
   );
   pendingPairing = null;
   clearPendingPairing();

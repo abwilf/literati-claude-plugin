@@ -52,7 +52,7 @@ async function start(projectUrl) {
   }
   if (!res.ok) return fail(`Pairing request failed: HTTP ${res.status}`);
   const body = await res.json();
-  savePendingPairing({ requestId: body.requestId, serverUrl });
+  savePendingPairing({ requestId: body.requestId, serverUrl, cwd: process.cwd() });
   console.log(
     [
       'Pairing request sent. Tell the user to:',
@@ -87,6 +87,8 @@ async function code(oneTimeCode) {
     if (body?.code === 'PAIRING_INVALID_CODE') {
       return fail('That code is not correct — re-check it and try again.');
     }
+    // Terminal: drop the dead request so it can't be resurrected later.
+    clearPendingPairing();
     return fail(
       'Pairing could not be completed (expired, denied, or too many attempts). Start over with `login.mjs start`.',
     );
@@ -102,7 +104,7 @@ async function code(oneTimeCode) {
       projectSlug: body.projectSlug,
       projectName: body.projectName,
     },
-    process.cwd(),
+    pending.cwd ?? process.cwd(),
   );
   clearPendingPairing();
   console.log(

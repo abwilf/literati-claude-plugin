@@ -11,10 +11,10 @@ the project's server-side documents.
 claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati && claude -p "/literati:login https://literati.ai/projects/your_project_id" --allowedTools "Bash"
 ```
 
-**2.** Approve the pairing request on your project page, then paste the one-time code it shows you:
+**2.** Approve the pairing request on your project page, then run this with the one-time code it shows you:
 
 ```bash
-claude -c "pairing code: YOUR_CODE_HERE"
+claude "/literati:login YOUR_CODE_HERE"
 ```
 
 ## Un-installation

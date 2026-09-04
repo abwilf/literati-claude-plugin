@@ -23,6 +23,7 @@ import {
   savePendingPairing,
   loadPendingPairing,
   clearPendingPairing,
+  isPairingFresh,
 } from '../lib/credentials.mjs';
 
 // Claude Code launches stdio MCP servers (user-scope registrations included)
@@ -49,7 +50,7 @@ const LOGIN_TOOL = {
     properties: {
       project_url: {
         type: 'string',
-        description: 'The Literati project URL (https://…/project/<id>) or bare project id/slug.',
+        description: 'The Literati project URL (https://literati.ai/projects/<id>) or bare project id/slug.',
       },
     },
     required: ['project_url'],
@@ -178,7 +179,9 @@ async function handleLogin(args) {
     return text(`Pairing request failed: HTTP ${res.status}`, true);
   }
   const body = await res.json();
-  pendingPairing = { requestId: body.requestId, serverUrl };
+  pendingPairing = { requestId: body.requestId, serverUrl, cwd: process.cwd(), createdAt: new Date().toISOString() };
+  // Best-effort: if the disk write fails this session can still finish the
+  // pairing from memory, and the request already exists server-side either way.
   savePendingPairing(pendingPairing);
   return text(
     [
@@ -196,10 +199,11 @@ async function handleLogin(args) {
 async function handleLoginCode(args) {
   const code = String(args?.code ?? '').trim();
   if (!code) return text('code is required.', true);
-  // A pairing started by scripts/login.mjs (or in an earlier session) lives on
-  // disk, not in this process's memory — fall back to it so the first-install
-  // flow can be finished here rather than started over.
-  const pending = pendingPairing ?? loadPendingPairing();
+  // Prefer the on-disk record: it is rewritten by every `literati_login` and
+  // every `login.mjs start`, in this process or another, so it is the
+  // authoritative one. In-memory is only a fallback for when the disk write
+  // failed, and is TTL-checked the same way.
+  const pending = loadPendingPairing() ?? (isPairingFresh(pendingPairing) ? pendingPairing : null);
   if (!pending) {
     return text('No pairing in progress — call literati_login with the project URL first.', true);
   }
@@ -222,14 +226,19 @@ async function handleLoginCode(args) {
     if (body?.code === 'PAIRING_INVALID_CODE') {
       return text('That code is not correct — ask the user to re-check it and try again.', true);
     }
+    // Terminal: the request is dead server-side, so drop it. Leaving it would
+    // keep serving a doomed request and make "no pairing in progress"
+    // permanently unreachable.
+    pendingPairing = null;
+    clearPendingPairing();
     return text(
       'Pairing could not be completed (expired, denied, or too many attempts). Start over with literati_login.',
       true,
     );
   }
   const body = await res.json();
-  // Bind the credential to this working directory: reopening Claude Code
-  // here (or in a subdirectory) resolves this project automatically.
+  // Bind to the directory the pairing was STARTED from, not wherever the code
+  // was pasted — finishing from another directory must not pair that one.
   addProjectCredential(
     {
       serverUrl: pending.serverUrl,
@@ -240,7 +249,7 @@ async function handleLoginCode(args) {
       projectSlug: body.projectSlug,
       projectName: body.projectName,
     },
-    process.cwd(),
+    pending.cwd ?? process.cwd(),
   );
   pendingPairing = null;
   clearPendingPairing();
