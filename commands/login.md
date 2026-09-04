@@ -64,8 +64,35 @@ If not paired:
      `claude -c`, which does not resume a `-p` session — re-invoking this
      command is what carries the state, since the pending request lives on disk.
 
-## 3. Finish
+## 3. Finish — welcome them to the project
 
-- Confirm which project the directory is now paired with.
-- If the MCP server was newly registered in step 1, tell the user to restart Claude Code (or try `/mcp` → reconnect) so the `literati` tools load; everything is ready on the next session. If instead the pairing was finished in a later session via `literati_login_code`, the tools load into that session immediately — no restart to mention.
-- If tools still don't appear after a restart, re-run `claude mcp get literati` to verify the registration.
+Once the pairing succeeds, don't just report success — open the project for
+them. Lead with the project name and a party emoji:
+
+> **Welcome to your Literati project "<project name>"! 🎉**
+
+Then, **if the Literati tools are loaded in this session** — they are whenever
+the pairing completed through `literati_login_code` — call `list_files` and show
+what's in the project. Keep it readable: a short list, or a summary by kind if
+there are many files.
+
+Then a brief "here's what I can do", in the user's terms rather than tool names.
+Something like:
+
+> - **Write and edit** — read and edit the `.tex`, `.bib` and `.sty` files directly on the server, so every change shows up live for you and your collaborators
+> - **Compile** — build the PDF and work through any LaTeX errors until it's clean
+> - **Find papers** — search for relevant work and add it straight to your library and bibliography
+> - **Use your library** — list what you've collected, skim papers, pull out claims and citations
+> - **Checkpoint** — stage and commit when you want to save a milestone
+
+Close by asking what they're working on.
+
+Keep the whole thing tight: a greeting, the files, about five capability lines.
+Do not dump the raw tool list or enumerate every tool name.
+
+- If the MCP server was newly registered in step 1, the tools are NOT loaded in
+  this session. Still give the welcome and the capability summary, but skip the
+  file list, tell the user to restart Claude Code (or try `/mcp` → reconnect),
+  and offer to show them the project files as soon as it comes back.
+- If tools still don't appear after a restart, re-run `claude mcp get literati`
+  to verify the registration.
