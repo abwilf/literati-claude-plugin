@@ -8,14 +8,18 @@ the project's server-side documents.
 **1.** Install: replace `your_project_id` below from your Literati project URL
 
 ```bash
-claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati && claude -p "/literati:login https://literati.ai/project/your_project_id" --allowedTools "Bash"
+claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati && claude -p "/literati:login https://app.literati.ai/project/your_project_id" --allowedTools "Bash"
 ```
 
-**2.** Approve the pairing request on your project page, then paste the one-time code it shows you:**
+**2.** Approve the pairing request on your project page, then paste the one-time code it shows you:
 
 ```bash
 claude -c "pairing code: YOUR_CODE_HERE"
 ```
+
+Run both from your project directory — pairing binds to that directory (and its
+subdirectories), and different directories can pair to different projects. No
+configuration is needed; the plugin talks to `https://api.literati.ai` by default.
 
 ## Un-installation
 
@@ -27,6 +31,5 @@ rm -rf ~/.literati                        # optional: credentials, bundle copy, 
 
 ## More
 
-- See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the login walkthrough, MCP registration details, session syncing, and how to develop on the plugin.
+- See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local development, the login walkthrough, MCP registration details, session syncing, and how to develop on the plugin.
 - Every session that touches a Literati tool is synced back to Literati via deterministic hooks so you can `/resume` it later inside the Literati agent. Continuing a synced session in Literati forks it.
-

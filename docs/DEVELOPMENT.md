@@ -12,34 +12,52 @@ tool calls display as `literati - edit (MCP)` (tools are namespaced
 transcript sync), the `/literati:login` command, and the server bundle; it
 does not declare the MCP server.
 
-### Pointing at a dev server
+## Local development
 
-The default API host is `https://api.literati.ai` (`mcp/index.mjs`,
-`scripts/login.mjs`). To work against a local server, register with
-`LITERATI_SERVER_URL` — note `-e` goes **after** the server name, since it is
-variadic and would otherwise swallow `literati`:
+To pair against a server running on your own machine, set `LITERATI_SERVER_URL`
+**before pairing**:
 
 ```bash
+LITERATI_SERVER_URL=http://localhost:3000 claude
+```
+
+…then run `/literati:login` in that session. The env var is inherited by the
+stdio MCP server, so this needs no change to your registration.
+
+If you prefer it permanent, re-register with the variable baked in — note `-e`
+goes **after** the server name, since it is variadic and would otherwise
+swallow `literati` ("Invalid environment variable format"):
+
+```bash
+claude mcp remove literati -s user
 claude mcp add --scope user literati -e LITERATI_SERVER_URL=http://localhost:3000 -- node ~/.literati/mcp/bundle.mjs
 ```
 
-**This matters at pairing time.** Pairing requests go to the default host
-(`LITERATI_SERVER_URL` or production), while tool calls for an already-paired
-directory go to the `serverUrl` stored in that credential. So a registration
-without the env var pairs against production even if you previously had a
-`localhost:3000` credential on disk. Set the env var *before* running
-`/literati:login`, or the login silently targets the wrong server. The same
-applies to the pairing CLI directly:
+**The host only matters at pairing time.** Once a directory is paired, its
+server URL is stored per-directory in `~/.literati/credentials.json`, and that
+stored value wins from then on. So:
+
+- An already-paired directory keeps using the host it was paired against, with
+  or without the env var.
+- A dev-paired directory and a production-paired directory work side by side
+  in the same Claude Code installation.
+- To repoint an existing directory, pair it again with the env var set.
+
+Check what a directory is bound to:
 
 ```bash
-LITERATI_SERVER_URL=http://localhost:3000 node scripts/login.mjs start <project-url>
+node -e "const j=require(require('os').homedir()+'/.literati/credentials.json');console.log(j.directories)"
 ```
+
+Each entry maps a directory to a `<serverUrl>|<collectionId>` key. If a
+directory you meant to pair against localhost shows `https://api.literati.ai|…`,
+the env var did not reach the server — re-pair with it set.
 
 ## Log in
 
-Run `/literati:login` (or just paste your project URL — `https://…/project/<id>`,
-or `http://localhost:3010/project/<id>` against a dev web app; a bare project
-id also works):
+Run `/literati:login` (or just paste your project URL — it looks like
+`https://app.literati.ai/project/<id>`, or `http://localhost:3010/project/<id>`
+in dev; a bare project id also works):
 
 1. Give Claude your project URL.
 2. Open that project in the Literati web app; approve the "Claude Code

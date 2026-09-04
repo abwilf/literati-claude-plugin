@@ -27,7 +27,14 @@ import {
 // right project per repo. No binding → logged out (no machine-wide fallback).
 const activeCredential = () => getCredentialForDir(process.cwd());
 
-const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'http://localhost:3000';
+// Production by default: an installed plugin must work with no configuration.
+// A localhost default silently pointed every fresh install at the user's own
+// machine, where pairing fails with a bare connection error that gives no hint
+// of the cause. Override with LITERATI_SERVER_URL for local development —
+// see README.md. Note the host is only consulted when a directory is FIRST
+// paired; after that it is stored per-directory in credentials.json, so the
+// env var is not needed again for an already-paired directory.
+const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'https://api.literati.ai';
 const EXECUTE_TIMEOUT_MS = 9 * 60_000; // compile can be slow
 
 const LOGIN_TOOL = {
