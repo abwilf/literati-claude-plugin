@@ -5,24 +5,16 @@ the project's server-side documents.
 
 ## Installation
 
-1. Install
+**1.** Install: replace `your_project_id` below from your Literati project URL
 
 ```bash
-claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati
+claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati && claude -p "/literati:login https://literati.ai/project/your_project_id" --allowedTools "Bash"
 ```
 
-1. Open Claude Code and enter your project URL to pair (you'll only have to do this once at startup per repo)
+**2.** Approve the pairing request on your project page, then paste the one-time code it shows you:**
 
 ```bash
-claude
-https://literati.ai/project/{your-project-here}/
-```
-
-1. Restart claude
-
-```bash
-exit
-claude --continue
+claude -c "pairing code: YOUR_CODE_HERE"
 ```
 
 ## Un-installation
