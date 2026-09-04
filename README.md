@@ -17,10 +17,6 @@ claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin ins
 claude -c "pairing code: YOUR_CODE_HERE"
 ```
 
-Run both from your project directory — pairing binds to that directory (and its
-subdirectories), and different directories can pair to different projects. No
-configuration is needed; the plugin talks to `https://api.literati.ai` by default.
-
 ## Un-installation
 
 ```bash
