@@ -25,6 +25,8 @@ import {
   clearPendingPairing,
   isPairingFresh,
 } from '../lib/credentials.mjs';
+// Snapshot of the server's tool list (scripts/snapshot-tool-catalog.mjs).
+import TOOL_CATALOG from './tool-catalog.json' with { type: 'json' };
 
 // Claude Code launches stdio MCP servers (user-scope registrations included)
 // with the session's working directory, so cwd-bound credentials resolve the
@@ -121,8 +123,10 @@ async function fetchToolsAndInstructions(signal) {
   }
 }
 
+// Bounded: tools/list waits on this, and a server that accepts the connection
+// but never answers would otherwise stall the client's startup.
 async function fetchRemoteTools() {
-  const startup = await fetchToolsAndInstructions();
+  const startup = await fetchToolsAndInstructions(AbortSignal.timeout(5000));
   return startup?.tools ?? null;
 }
 
@@ -142,10 +146,20 @@ const server = new Server(
   },
 );
 
+// Codex lists tools once per session and ignores tools/list_changed, so after
+// a mid-session login it would keep only the two login tools until a restart.
+// For such clients, advertise the catalog snapshot up front: until the folder
+// is paired every call answers "not logged in", and once it is the same names
+// just work (handleRemoteTool re-reads the credential on every call). Claude
+// Code keeps the two-tool list until login — it refreshes on list_changed.
+function listsToolsOnce() {
+  return (server.getClientVersion()?.name ?? '').startsWith('codex');
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   if (!remoteTools) remoteTools = await fetchRemoteTools();
   const tools = [LOGIN_TOOL, LOGIN_CODE_TOOL];
-  for (const t of remoteTools ?? []) {
+  for (const t of remoteTools ?? (listsToolsOnce() ? TOOL_CATALOG.tools : [])) {
     tools.push({
       name: t.name,
       description: t.description,

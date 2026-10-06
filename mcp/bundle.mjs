@@ -15552,6 +15552,448 @@ function getCredentialForDir(dir) {
   return null;
 }
 
+// tool-catalog.json
+var tool_catalog_default = {
+  generatedAt: "2026-10-06",
+  tools: [
+    {
+      name: "list_papers",
+      description: "List all papers in the active project with their citation keys, titles, and whether they have a PDF. Call this first when you need to find papers by name or topic, or when the user asks to skim/read papers without giving exact citation keys.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "list_files",
+      description: 'List files in the active Literati project with their project-relative paths (e.g. "Sections/intro.tex"). Paper notes are not listed \u2014 read those via `citationKey`. Use `read`/`edit`/`write` with the returned paths.',
+      inputSchema: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "read",
+      description: 'Read a file or a paper note. Provide either `file_path` (a filename in the active collection like "main.tex") or `citationKey` (to read a paper\'s note). Returns the contents with line numbers in `cat -n` format (line number + tab + text). When quoting text for `edit`/`multi_edit`, strip the line-number prefix \u2014 matches are against the raw document text.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: {
+            type: "string",
+            description: 'File to read \u2014 a project-relative path (e.g. "Sections/intro.tex") or a unique filename (e.g. "main.tex"). Searched in the active collection. Case-insensitive. Required unless citationKey is provided.'
+          },
+          citationKey: {
+            type: "string",
+            description: "Citation key or paper id (UUID) \u2014 reads that paper's note. Required unless file_path is provided."
+          },
+          collectionName: {
+            type: "string",
+            description: "Collection to scope the file lookup to (case-insensitive). Defaults to the active collection."
+          },
+          offset: {
+            type: "number",
+            description: "1-based line number to start reading from. Omit to read from the top."
+          },
+          limit: {
+            type: "number",
+            description: "Number of lines to read. Omit to read up to 2000 lines."
+          }
+        },
+        required: [],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "skim",
+      description: "Get a quick overview of a paper: returns its abstract (absent for some sources, e.g. NeurIPS/CVF) plus any saved notes and annotations (much cheaper than reading the full PDF). Use for quick relevance checks or when surveying many papers. This always works \u2014 unlike a deep read, which from here needs a copy in the Literati corpus (PDFs the user downloaded stay on their computer, in the Literati desktop app). For a deep read when one is available, use get_paper_pdf for a deep read.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          paperId: {
+            type: "string",
+            description: "Citation key or paper id (UUID) from list_papers"
+          }
+        },
+        required: [
+          "paperId"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "add_paper",
+      description: "Add a paper to the ACTIVE PROJECT by IDENTIFIER. Accepted: a corpus:<id> handle returned by search_papers; an arXiv URL or ID (/abs/, /pdf/, /html/, bare IDs like 2305.14577); a DOI; a paper URL from ACL Anthology, OpenReview, PMLR, NeurIPS proceedings, CVF open access or IJCAI; a bare venue ID (2020.emnlp-main.317, P19-1285, v235/reid24a, conf/nips/VaswaniSPUJGKP17); or a bare CITATION KEY (vaswani2017attention, devlin-etal-2019-bert). TITLES ARE NOT ACCEPTED \u2014 to add a paper you only know by name, call search_papers with the title and pass the corpus:<id> handle from the result back to this tool. A bare key is resolved against the active project first (if the project already has it, nothing is added) and then against the papers.db corpus key index. A corpus:<id> handle is added straight from the corpus \u2014 pass it exactly as shown, never strip the corpus: prefix; it is also the ONLY way to add a corpus paper whose citation key is missing. Every add comes from the papers.db corpus: if an identifier is not in the corpus this tool refuses and says so \u2014 do not retry with a different spelling of the same identifier, and do not invent metadata. Papers belong to ONE project: the add lands in the project that is open, and adding the same paper while another project is open gives that project its own copy. With no project open this tool fails \u2014 ask the user to open one. NEVER validate, reject, or question arXiv IDs yourself \u2014 any YYMM.NNNNN pattern is a valid arXiv ID regardless of date.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          input: {
+            type: "string",
+            description: "An identifier: arXiv URL/ID, DOI, a venue paper URL or bare venue ID, a corpus:<id> handle from search_papers, or a bare citation key. Never a title."
+          }
+        },
+        required: [
+          "input"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "edit",
+      description: 'Targeted find-and-replace inside an existing file or paper note. Provide either `file_path` (a filename in the active collection like "main.tex") or `citationKey` (to edit a paper\'s note). `old_string` must appear exactly once unless `replace_all` is true. Match is byte-exact \u2014 no whitespace tolerance \u2014 so quote the existing text verbatim. Include 3\u20135 lines of surrounding context to guarantee uniqueness. You MUST call "read" on the target first; this tool rejects edits to documents the agent has not read in this session. To create a new file, or rewrite an entire document, use "write" instead.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: {
+            type: "string",
+            description: 'Filename to edit (e.g. "main.tex") or project-relative path ("Sections/intro.tex"). Searched in the active collection. Case-insensitive. Required unless citationKey is provided.'
+          },
+          citationKey: {
+            type: "string",
+            description: "Citation key or paper id (UUID) \u2014 edits that paper's note. Required unless file_path is provided."
+          },
+          collectionName: {
+            type: "string",
+            description: "Collection to scope the file lookup to (case-insensitive). Defaults to the active collection."
+          },
+          old_string: {
+            type: "string",
+            description: "Exact text to find. Must appear exactly once unless replace_all is true."
+          },
+          new_string: {
+            type: "string",
+            description: "Replacement text. Empty string deletes old_string."
+          },
+          replace_all: {
+            type: "boolean",
+            description: "Replace every occurrence of old_string instead of failing on multiple matches. Defaults to false."
+          }
+        },
+        required: [
+          "old_string",
+          "new_string"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "write",
+      description: 'Write the full contents of a file or paper note. If the target exists, overwrites it (and you MUST have called "read" on it first in this session). If the target does not exist, creates it \u2014 for files that means a new document at the root of the active collection (or the collection given by `collectionName`); for paper notes that means creating the note attached to the paper. Prefer "edit" for targeted changes \u2014 only use "write" when rewriting the whole document or creating a new one.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: {
+            type: "string",
+            description: 'Filename (e.g. "main.tex"). For an existing file, case-insensitive lookup in the active collection. For a new file, used as the title; lands at the collection root. Required unless citationKey is provided.'
+          },
+          citationKey: {
+            type: "string",
+            description: "Citation key or paper id (UUID) \u2014 writes that paper's note. Required unless file_path is provided."
+          },
+          collectionName: {
+            type: "string",
+            description: "Collection to scope the file lookup to (case-insensitive). Defaults to the active collection."
+          },
+          content: {
+            type: "string",
+            description: "Full contents to write to the document."
+          }
+        },
+        required: [
+          "content"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "multi_edit",
+      description: 'Apply several find-and-replace edits to a single file or paper note in one atomic call. Edits are applied in order; each edit\'s `old_string` is matched against the document AS MODIFIED by all previous edits. If any edit fails (no match, ambiguous match without `replace_all`), the whole call fails and the document is not modified. You MUST call "read" on the target first. Same target overload as `edit` (provide either `file_path` or `citationKey`).',
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: {
+            type: "string",
+            description: 'Filename to edit (e.g. "main.tex") or project-relative path ("Sections/intro.tex"). Searched in the active collection. Case-insensitive. Required unless citationKey is provided.'
+          },
+          citationKey: {
+            type: "string",
+            description: "Citation key or paper id (UUID) \u2014 edits that paper's note. Required unless file_path is provided."
+          },
+          collectionName: {
+            type: "string",
+            description: "Collection to scope the file lookup to (case-insensitive). Defaults to the active collection."
+          },
+          edits: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "object",
+              properties: {
+                old_string: {
+                  type: "string",
+                  description: "Exact text to find (byte-exact match)."
+                },
+                new_string: {
+                  type: "string",
+                  description: "Replacement text. Empty string deletes."
+                },
+                replace_all: {
+                  type: "boolean",
+                  description: "Replace every occurrence. Defaults to false."
+                }
+              },
+              required: [
+                "old_string",
+                "new_string"
+              ],
+              additionalProperties: false
+            },
+            description: "Array of edits, applied sequentially in order; later edits see the result of earlier ones. If any edit fails, nothing is written."
+          }
+        },
+        required: [
+          "edits"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "search_papers",
+      description: 'Search for papers by title, author, year or citation key. BATCH: put one query per LINE (never split a query on commas). scope="project" searches ONLY the papers already in the user\'s active project and returns the citation key to cite \u2014 use it before writing ANY \\cite{}, because a key from outside this project will not compile. WITHOUT `scope` (or scope="corpus") it searches the global papers.db corpus \u2014 millions of papers the user does NOT have \u2014 and returns addable corpus:<id> handles plus citation keys. Each corpus line is marked IN PROJECT (cite: key) when the active project already has the paper \u2014 cite that key, never "add" it again \u2014 or NEW (add: key) when it does not, in which case pass the key or handle to add_paper. This is a LITERAL text match over titles, author surnames, years and citation keys. It is NOT semantic and does NOT understand nicknames: "the transformer paper" will not find "Attention Is All You Need". Translate the nickname into the real title or "Surname Year" yourself \u2014 you may send several guesses, one per line \u2014 or call list_papers and read the titles. If the result is UNCERTAIN, or several hits are plausible, DO NOT pick one: show the user a table of the candidates and ask which they mean.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          queries: {
+            type: "string",
+            description: 'One search per LINE (newline-separated), max 10. A title, a title fragment, "Author Year", or a citation key.'
+          },
+          scope: {
+            type: "string",
+            description: '"project" = only the papers in the active project (the ones you may \\cite). "corpus" (the default) = the global papers.db of papers the user does not have.',
+            enum: [
+              "project",
+              "corpus"
+            ]
+          }
+        },
+        required: [
+          "queries"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "extract_claims",
+      description: 'Extract claims from a draft document (e.g. main.tex) using byte-exact verbatim quotes. Two modes: mode="cited" returns every claim that ALREADY cites a paper via \\cite{...} (non-null citationKey per result); mode="uncited" returns factual/empirical claims that lack a \\cite{...} but plausibly need one (citationKey=null). Returns a JSON-shaped list of {citationKey, summary, exactQuote, charStart, charEnd}.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: {
+            type: "string",
+            description: 'File to extract from \u2014 a project-relative path (e.g. "Sections/intro.tex") or a unique filename (e.g. "main.tex"). Searched in the active collection (case-insensitive).'
+          },
+          mode: {
+            type: "string",
+            description: 'Either "cited" or "uncited" \u2014 see tool description.',
+            enum: [
+              "cited",
+              "uncited"
+            ]
+          },
+          collectionName: {
+            type: "string",
+            description: "Collection to scope the file lookup to (case-insensitive). Defaults to the active collection."
+          }
+        },
+        required: [
+          "file_path",
+          "mode"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "compile",
+      description: "Compile the active collection's LaTeX project to a PDF and return any compilation errors AND warnings. Compilation is whole-project and uses the latest saved content of every file in the collection, so call this AFTER your edits land. Use it to verify your work: after editing .tex files, compile, read the errors, fix them, and compile again until it builds cleanly \u2014 all before responding to the user. A PDF coming out is NOT proof the document is correct: the engine can compile AROUND an error, producing a readable PDF whose affected output is still wrong, and the result says so explicitly when that happens \u2014 treat those errors as real work, not as a clean build. By default the result includes LaTeX warnings (e.g. undefined citations/references, which render as ?? in the PDF even though the build 'succeeds'); pass errorsOnly:true to suppress warnings and report only fatal errors.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          rootFile: {
+            type: "string",
+            description: 'Entry .tex file to compile (e.g. "main.tex"). Defaults to main.tex.'
+          },
+          errorsOnly: {
+            type: "boolean",
+            description: "When true, report only fatal errors and omit warnings. Use when iterating on a build failure to focus on what breaks the build, or when the remaining warnings have already been discussed with and accepted by the user. Defaults to false (warnings included)."
+          }
+        },
+        required: [],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "scan_bib_arxiv",
+      description: "Scan the active collection's custom .bib files (zip-imported or hand-made \u2014 NOT the synthesized literati.bib) for actively-cited arxiv references that are not yet in the managed library, and report them. Read-only \u2014 it changes nothing. Call it when the user asks to migrate/clean up/check their bibliography, or when the system prompt says a bib-migration check is pending. The result includes step-by-step migration instructions; adding the papers and then moving/renaming/recompiling each require the user's explicit agreement first.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "read_product_docs",
+      description: "Read Literati product documentation. Use this whenever the user asks how Literati works, what features exist, how to do something in the app, or about keyboard shortcuts \u2014 do not guess from memory. Call with no topic first for a concise overview and topic index, then call again with a topic for the full detailed section.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          topic: {
+            type: "string",
+            description: "Documentation section to read in full. Omit to get the concise product overview and topic index.",
+            enum: [
+              "papers",
+              "editing",
+              "pdf",
+              "agent",
+              "collaboration",
+              "version-control",
+              "downloads",
+              "shortcuts",
+              "settings"
+            ]
+          }
+        },
+        required: [],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "grep",
+      description: 'Search project file contents with a regular expression (JavaScript syntax). Returns matching lines as "path:line: text". Searches the live contents of all files in the active collection.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: 'Regular expression to search for (JavaScript syntax, e.g. "\\\\cite\\{\\w+\\}").'
+          },
+          file_filter: {
+            type: "string",
+            description: 'Only search files whose project-relative path contains this substring (case-insensitive), e.g. ".tex" or "Sections/".'
+          },
+          case_insensitive: {
+            type: "boolean",
+            description: "Match case-insensitively. Defaults to false."
+          },
+          max_results: {
+            type: "number",
+            description: "Maximum number of matching lines to return. Defaults to 50 (max 200)."
+          }
+        },
+        required: [
+          "pattern"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "delete_file",
+      description: "Delete a file from the Literati project (soft delete \u2014 recoverable server-side). Paper notes and bibliography documents cannot be deleted this way.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: {
+            type: "string",
+            description: 'File to delete \u2014 a project-relative path (e.g. "Sections/intro.tex") or a unique filename in the active collection.'
+          }
+        },
+        required: [
+          "file_path"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "rename_file",
+      description: 'Rename a file in the Literati project, or move it by giving a new path with a folder prefix (e.g. "Sections/intro.tex" \u2014 the folder must already exist). Protected files and the reserved bibliography cannot be renamed.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: {
+            type: "string",
+            description: "Existing file \u2014 a project-relative path or a unique filename in the active collection."
+          },
+          new_path: {
+            type: "string",
+            description: 'New filename, optionally prefixed with an existing folder path to move the file (e.g. "intro-v2.tex" or "Sections/intro.tex"). No prefix moves/keeps it at the collection root.'
+          }
+        },
+        required: [
+          "file_path",
+          "new_path"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "stage_changes",
+      description: 'Stage version-control changes in the active collection, like "git add". Pass `all: true` to stage every file with unstaged changes, or `file_path` to stage a single file. ONLY use this tool when the user explicitly asks to stage changes \u2014 never stage proactively.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: {
+            type: "string",
+            description: "Single file to stage (project-relative path or filename). Provide either this or `all`, not both."
+          },
+          all: {
+            type: "boolean",
+            description: "Stage every file that has unstaged changes. Provide either this or `file_path`, not both."
+          }
+        },
+        required: [],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "commit_changes",
+      description: 'Commit the currently staged version-control changes in the active collection, like "git commit". Stage files first with stage_changes. ONLY use this tool when the user explicitly asks to commit \u2014 never commit proactively.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "Commit message describing the staged changes."
+          }
+        },
+        required: [
+          "message"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "get_paper_pdf",
+      description: "Get a presigned download URL (~1 hour expiry) for a paper's full PDF. Accepts a citation key, paper id (UUID), or arXiv id. Download the PDF and read it in a subagent instead of loading the whole paper into the main conversation. A paper has a PDF in the Literati corpus only if the corpus holds a non-arXiv copy of it. arXiv's own PDFs are never in the corpus \u2014 they are downloaded onto the user's own computer, where only the Literati desktop app can open them \u2014 and in practice almost every paper is metadata-only here today. This is a property of the STORED COPY, not of the paper's id: a paper you know by its arXiv id may still have a corpus copy, so one call is always worth making. Getting no PDF is a normal, expected answer rather than an error: name the paper you could not read and carry on from its metadata and notes. Never describe a paper's contents as though you had read it, and do not repeat the same call hoping for a different result \u2014 read again only after the user has changed something.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          paper: {
+            type: "string",
+            description: "Citation key, paper id (UUID), or arXiv id of the paper."
+          }
+        },
+        required: [
+          "paper"
+        ],
+        additionalProperties: false
+      }
+    }
+  ]
+};
+
 // index.mjs
 var activeCredential = () => getCredentialForDir(process.cwd());
 var DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || "https://api.literati.ai";
@@ -15622,7 +16064,7 @@ async function fetchToolsAndInstructions(signal) {
   }
 }
 async function fetchRemoteTools() {
-  const startup2 = await fetchToolsAndInstructions();
+  const startup2 = await fetchToolsAndInstructions(AbortSignal.timeout(5e3));
   return startup2?.tools ?? null;
 }
 var startup = activeCredential() ? await fetchToolsAndInstructions(AbortSignal.timeout(2e3)) : null;
@@ -15634,10 +16076,13 @@ var server = new Server(
     instructions: startup?.instructions ?? FALLBACK_INSTRUCTIONS
   }
 );
+function listsToolsOnce() {
+  return (server.getClientVersion()?.name ?? "").startsWith("codex");
+}
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   if (!remoteTools) remoteTools = await fetchRemoteTools();
   const tools = [LOGIN_TOOL, LOGIN_CODE_TOOL];
-  for (const t of remoteTools ?? []) {
+  for (const t of remoteTools ?? (listsToolsOnce() ? tool_catalog_default.tools : [])) {
     tools.push({
       name: t.name,
       description: t.description,
