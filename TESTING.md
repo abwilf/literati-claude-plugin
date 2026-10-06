@@ -154,6 +154,29 @@ After a session that used Literati tools:
 
 ---
 
+## 11. Codex
+
+Run against a local server; use a fresh folder per pairing.
+
+```bash
+codex plugin marketplace add <your-checkout>
+codex plugin add literati@literati
+mkdir -p ~/literati-codex-test && cd ~/literati-codex-test
+LITERATI_SERVER_URL=http://localhost:3000 codex --no-daemon
+```
+
+- `/hooks` → trust the Literati SessionStart hook.
+- `/mcp` → `literati: connected (21 tools)` even before pairing (first session
+  after install runs the bundle from Codex's plugin cache).
+- "Use the literati_login tool to connect this folder to <project URL>" →
+  approve in the web app → paste the code → **without restarting**, "list the
+  papers in this Literati project" works.
+- A second folder paired to another project only sees its own project.
+- Read 10 lines of `main.tex`, then `write` → refused; `edit` + `compile` work.
+- Claude Code in the same folder: one `literati` server, same pairing.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -163,5 +186,6 @@ After a session that used Literati tools:
 | Tools missing | `/mcp` — is `literati` connected? `claude mcp get literati` registered and pointing at `~/.literati/mcp/bundle.mjs`? Registered with `-e LITERATI_SERVER_URL` for dev? |
 | No /resume entry | `ls ~/.literati/sessions/` — no marker means no Literati tool ran (PostToolUse matcher) |
 | Compile/tree not refreshing in browser | Hard-refresh the tab (new bundle needed after renderer changes) |
-| Plugin edits not taking effect | Bump version in `.claude-plugin/plugin.json`, rebuild `mcp/bundle.mjs`, `claude plugin update literati@literati`, restart session (the SessionStart hook refreshes `~/.literati/mcp/bundle.mjs` on version change) |
+| Plugin edits not taking effect | Bump version in `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, rebuild `mcp/bundle.mjs`, `claude plugin update literati@literati`, restart session (the SessionStart hook refreshes `~/.literati/mcp/bundle.mjs` on version change; Codex's hook refreshes `~/.literati/mcp/codex/bundle.mjs` on the next session) |
+| Codex: `literati` failed to start | Stderr names the cause; `ls ~/.literati/mcp/codex/` — empty and no plugin cache means reinstall (`codex plugin add literati@literati`), then trust the hook in `/hooks` |
 | Two tool sets (duplicated tools) | A legacy sideload (`--plugin-dir`) or ≤0.5.2 plugin-declared server is active alongside the user-scope one — remove the sideload / update the plugin |
