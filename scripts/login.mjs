@@ -26,6 +26,9 @@ import {
 // against. Production by default so a fresh install works unconfigured;
 // set LITERATI_SERVER_URL for local development (see README.md).
 const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'https://api.literati.ai';
+// Only Claude Code's /literati:login runs this script (labels only — see
+// clientHeaders in mcp/index.mjs).
+const CLIENT_HEADERS = { 'X-Literati-Client': 'claude-code' };
 
 function fail(msg) {
   console.error(msg);
@@ -40,7 +43,7 @@ async function start(projectUrl) {
   try {
     res = await fetch(`${serverUrl}/cli/pairing/requests`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CLIENT_HEADERS },
       body: JSON.stringify({ project: projectUrl, requesterLabel }),
       signal: AbortSignal.timeout(15_000),
     });
@@ -57,7 +60,7 @@ async function start(projectUrl) {
     [
       'Pairing request sent. Tell the user to:',
       '  1. Open the project page in the Literati web app (the URL they gave you).',
-      '  2. Approve the "Claude Code pairing request" prompt that appears there.',
+      '  2. Approve the pairing request prompt that appears there.',
       '  3. Copy the one-time code Literati shows and paste it here.',
       'Then run: login.mjs code <one-time-code>',
       'The request expires in 10 minutes.',
@@ -75,7 +78,7 @@ async function code(oneTimeCode) {
   try {
     res = await fetch(`${pending.serverUrl}/cli/pairing/requests/${pending.requestId}/exchange`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CLIENT_HEADERS },
       body: JSON.stringify({ code: oneTimeCode }),
       signal: AbortSignal.timeout(15_000),
     });

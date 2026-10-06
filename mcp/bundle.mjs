@@ -16000,7 +16000,7 @@ var DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || "https://api.literat
 var EXECUTE_TIMEOUT_MS = 9 * 6e4;
 var LOGIN_TOOL = {
   name: "literati_login",
-  description: "Start pairing this Claude Code instance with a Literati project. Ask the user for their Literati project URL (or project id/slug) first, then call this tool with it. It sends an approval prompt to the project page in the Literati web app.",
+  description: "Pair this folder with a Literati project. Call this whenever the user gives a Literati project URL (\u2026/project/<id>) or asks to connect or log in to Literati \u2014 pair with this tool rather than fetching or curling the URL to connect (opening it in the user's browser for them is fine). If they have not given one, ask for their Literati project URL (or project id/slug) first. It sends an approval prompt to the project page in the Literati web app.",
   inputSchema: {
     type: "object",
     properties: {
@@ -16029,7 +16029,7 @@ var pendingPairing = null;
 var remoteTools = null;
 var FALLBACK_INSTRUCTIONS = [
   "Literati manages LaTeX research projects with server-side files and a paper library.",
-  "If Literati tools are missing or fail with a login error, pair via the literati_login flow (ask the user for their project URL).",
+  `When the user gives a Literati project URL or asks to connect Literati, pair by calling literati_login with it \u2014 don't fetch or curl the URL to connect (opening it in the user's browser for them is fine). If Literati tools are missing or a Literati tool fails with "Not logged in", pair the same way (ask the user for their project URL).`,
   "NEVER hand-edit .bib bibliography files \u2014 add references with the add_paper tool (hand-written BibTeX risks hallucinated citations); .bib edits require explicit in-app user approval.",
   "After editing .tex/.bib/.sty files, run the compile tool and fix errors before finishing.",
   "Only use stage_changes / commit_changes when the user explicitly asks."
@@ -16037,12 +16037,24 @@ var FALLBACK_INSTRUCTIONS = [
 function text(s, isError = false) {
   return { content: [{ type: "text", text: s }], isError };
 }
+var mcpServer = null;
+function clientKind() {
+  const name = mcpServer?.getClientVersion()?.name ?? "";
+  if (name.startsWith("codex")) return "codex";
+  if (name === "claude-code") return "claude-code";
+  return null;
+}
+function clientHeaders() {
+  const kind = clientKind();
+  return kind ? { "X-Literati-Client": kind } : {};
+}
 async function api(cred, path, init = {}) {
   const res = await fetch(`${cred.serverUrl}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${cred.token}`,
+      ...clientHeaders(),
       ...init.headers ?? {}
     }
   });
@@ -16076,8 +16088,9 @@ var server = new Server(
     instructions: startup?.instructions ?? FALLBACK_INSTRUCTIONS
   }
 );
+mcpServer = server;
 function listsToolsOnce() {
-  return (server.getClientVersion()?.name ?? "").startsWith("codex");
+  return clientKind() === "codex";
 }
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   if (!remoteTools) remoteTools = await fetchRemoteTools();
@@ -16100,7 +16113,7 @@ async function handleLogin(args) {
   try {
     res = await fetch(`${serverUrl}/cli/pairing/requests`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...clientHeaders() },
       body: JSON.stringify({ project: projectUrl, requesterLabel }),
       signal: AbortSignal.timeout(15e3)
     });
@@ -16121,7 +16134,7 @@ async function handleLogin(args) {
       "Pairing request sent.",
       "Tell the user to:",
       "  1. Open the project page in the Literati web app (the URL they gave you).",
-      '  2. Approve the "Claude Code pairing request" prompt that appears there.',
+      "  2. Approve the pairing request prompt that appears there.",
       "  3. Copy the one-time code Literati shows and paste it here.",
       "When the user gives you the code, call literati_login_code with it.",
       "The request expires in 10 minutes."
@@ -16141,7 +16154,7 @@ async function handleLoginCode(args) {
       `${pending.serverUrl}/cli/pairing/requests/${pending.requestId}/exchange`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...clientHeaders() },
         body: JSON.stringify({ code }),
         signal: AbortSignal.timeout(15e3)
       }
@@ -16182,9 +16195,13 @@ async function handleLoginCode(args) {
   } catch {
   }
   const toolCount = remoteTools?.length ?? 0;
-  return text(
-    `Logged in to Literati project "${body.projectName}". ${toolCount > 0 ? `${toolCount} Literati tools are now available.` : "If Literati tools do not appear, reconnect the MCP server (or restart Claude Code)."}`
-  );
+  let next;
+  if (listsToolsOnce()) {
+    const example = (remoteTools ?? tool_catalog_default.tools)[0]?.name;
+    next = `The Literati tools are ready \u2014 call them directly${example ? ` (e.g. ${example})` : ""}.`;
+  } else if (toolCount > 0) next = `${toolCount} Literati tools are now available.`;
+  else next = "If Literati tools do not appear, reconnect the MCP server (or restart your client).";
+  return text(`Logged in to Literati project "${body.projectName}". ${next}`);
 }
 async function handleRemoteTool(name, args) {
   const cred = activeCredential();

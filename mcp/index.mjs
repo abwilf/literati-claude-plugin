@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Literati MCP server (stdio): proxies Literati's agent tools to Claude Code.
+// Literati MCP server (stdio): proxies Literati's agent tools to Claude Code
+// and Codex.
 //
 // Two states:
 //   - Not logged in: only `literati_login` / `literati_login_code` are
@@ -28,8 +29,8 @@ import {
 // Snapshot of the server's tool list (scripts/snapshot-tool-catalog.mjs).
 import TOOL_CATALOG from './tool-catalog.json' with { type: 'json' };
 
-// Claude Code launches stdio MCP servers (user-scope registrations included)
-// with the session's working directory, so cwd-bound credentials resolve the
+// Claude Code and Codex launch stdio MCP servers (user-scope registrations
+// included) in the session's working directory, so cwd-bound credentials resolve the
 // right project per repo. No binding → logged out (no machine-wide fallback).
 const activeCredential = () => getCredentialForDir(process.cwd());
 
@@ -46,7 +47,7 @@ const EXECUTE_TIMEOUT_MS = 9 * 60_000; // compile can be slow
 const LOGIN_TOOL = {
   name: 'literati_login',
   description:
-    'Start pairing this Claude Code instance with a Literati project. Ask the user for their Literati project URL (or project id/slug) first, then call this tool with it. It sends an approval prompt to the project page in the Literati web app.',
+    "Pair this folder with a Literati project. Call this whenever the user gives a Literati project URL (…/project/<id>) or asks to connect or log in to Literati — pair with this tool rather than fetching or curling the URL to connect (opening it in the user's browser for them is fine). If they have not given one, ask for their Literati project URL (or project id/slug) first. It sends an approval prompt to the project page in the Literati web app.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -85,7 +86,7 @@ let remoteTools = null;
 // carries the safety-critical rules; the next session gets the real text.
 const FALLBACK_INSTRUCTIONS = [
   'Literati manages LaTeX research projects with server-side files and a paper library.',
-  'If Literati tools are missing or fail with a login error, pair via the literati_login flow (ask the user for their project URL).',
+  "When the user gives a Literati project URL or asks to connect Literati, pair by calling literati_login with it — don't fetch or curl the URL to connect (opening it in the user's browser for them is fine). If Literati tools are missing or a Literati tool fails with \"Not logged in\", pair the same way (ask the user for their project URL).",
   'NEVER hand-edit .bib bibliography files — add references with the add_paper tool (hand-written BibTeX risks hallucinated citations); .bib edits require explicit in-app user approval.',
   'After editing .tex/.bib/.sty files, run the compile tool and fix errors before finishing.',
   'Only use stage_changes / commit_changes when the user explicitly asks.',
@@ -95,12 +96,33 @@ function text(s, isError = false) {
   return { content: [{ type: 'text', text: s }], isError };
 }
 
+// Set once the MCP server exists. The startup tool fetch below runs before
+// it (and before the client has introduced itself), so it goes out without a
+// client header.
+let mcpServer = null;
+
+/** Which known client is connected — from its MCP `initialize` clientInfo. */
+function clientKind() {
+  const name = mcpServer?.getClientVersion()?.name ?? '';
+  if (name.startsWith('codex')) return 'codex'; // Codex sends `codex-mcp-client`
+  if (name === 'claude-code') return 'claude-code';
+  return null;
+}
+
+/** Tells Literati which client is calling (pairing prompt label, telemetry).
+ * Self-reported, so the server uses it for labels only — never authorization. */
+function clientHeaders() {
+  const kind = clientKind();
+  return kind ? { 'X-Literati-Client': kind } : {};
+}
+
 async function api(cred, path, init = {}) {
   const res = await fetch(`${cred.serverUrl}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${cred.token}`,
+      ...clientHeaders(),
       ...(init.headers ?? {}),
     },
   });
@@ -132,7 +154,7 @@ async function fetchRemoteTools() {
 
 // Instructions are constructor-only in the MCP SDK (read once during the
 // initialize handshake), so fetch them BEFORE constructing the server —
-// bounded to 2s so a down server never blocks Claude Code startup.
+// bounded to 2s so a down server never blocks the client's startup.
 const startup = activeCredential()
   ? await fetchToolsAndInstructions(AbortSignal.timeout(2000))
   : null;
@@ -145,6 +167,7 @@ const server = new Server(
     instructions: startup?.instructions ?? FALLBACK_INSTRUCTIONS,
   },
 );
+mcpServer = server;
 
 // Codex lists tools once per session and ignores tools/list_changed, so after
 // a mid-session login it would keep only the two login tools until a restart.
@@ -153,7 +176,7 @@ const server = new Server(
 // just work (handleRemoteTool re-reads the credential on every call). Claude
 // Code keeps the two-tool list until login — it refreshes on list_changed.
 function listsToolsOnce() {
-  return (server.getClientVersion()?.name ?? '').startsWith('codex');
+  return clientKind() === 'codex';
 }
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -179,7 +202,7 @@ async function handleLogin(args) {
   try {
     res = await fetch(`${serverUrl}/cli/pairing/requests`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...clientHeaders() },
       body: JSON.stringify({ project: projectUrl, requesterLabel }),
       signal: AbortSignal.timeout(15_000),
     });
@@ -202,7 +225,7 @@ async function handleLogin(args) {
       'Pairing request sent.',
       'Tell the user to:',
       '  1. Open the project page in the Literati web app (the URL they gave you).',
-      '  2. Approve the "Claude Code pairing request" prompt that appears there.',
+      '  2. Approve the pairing request prompt that appears there.',
       '  3. Copy the one-time code Literati shows and paste it here.',
       'When the user gives you the code, call literati_login_code with it.',
       'The request expires in 10 minutes.',
@@ -227,7 +250,7 @@ async function handleLoginCode(args) {
       `${pending.serverUrl}/cli/pairing/requests/${pending.requestId}/exchange`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...clientHeaders() },
         body: JSON.stringify({ code }),
         signal: AbortSignal.timeout(15_000),
       },
@@ -274,13 +297,17 @@ async function handleLoginCode(args) {
     /* client may not support listChanged */
   }
   const toolCount = remoteTools?.length ?? 0;
-  return text(
-    `Logged in to Literati project "${body.projectName}". ${
-      toolCount > 0
-        ? `${toolCount} Literati tools are now available.`
-        : 'If Literati tools do not appear, reconnect the MCP server (or restart Claude Code).'
-    }`,
-  );
+  // A client that lists tools once already has the catalog: say so plainly,
+  // or the model goes looking for "newly available" tools and gives up.
+  let next;
+  if (listsToolsOnce()) {
+    // Name a tool the client was actually given, so the example never goes stale.
+    const example = (remoteTools ?? TOOL_CATALOG.tools)[0]?.name;
+    next = `The Literati tools are ready — call them directly${example ? ` (e.g. ${example})` : ''}.`;
+  }
+  else if (toolCount > 0) next = `${toolCount} Literati tools are now available.`;
+  else next = 'If Literati tools do not appear, reconnect the MCP server (or restart your client).';
+  return text(`Logged in to Literati project "${body.projectName}". ${next}`);
 }
 
 async function handleRemoteTool(name, args) {
