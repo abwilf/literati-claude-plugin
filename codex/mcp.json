@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "literati": {
+      "command": "node",
+      "args": [
+        "-e",
+        "// Codex MCP launcher — embedded verbatim as `node -e` in codex/mcp.json (keep them identical; codex-packaging.test.mjs checks). Shell-free so it also runs on Windows.\nconst fs = require('fs');\nconst path = require('path');\nconst os = require('os');\nconst { pathToFileURL } = require('url');\n\n// The copy codex-session-start.mjs maintains. Before that hook has ever run\n// (first session after install, hook not yet trusted, `codex exec`), fall back\n// to the newest bundle in Codex's plugin cache.\nconst copy = path.join(os.homedir(), '.literati', 'mcp', 'codex', 'bundle.mjs');\n\nfunction newestCachedBundle() {\n  const cache = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'plugins', 'cache');\n  let best = null;\n  let marketplaces = [];\n  try {\n    marketplaces = fs.readdirSync(cache);\n  } catch {\n    return null;\n  }\n  for (const marketplace of marketplaces) {\n    let versions = [];\n    try {\n      versions = fs.readdirSync(path.join(cache, marketplace, 'literati'));\n    } catch {\n      continue;\n    }\n    for (const version of versions) {\n      const file = path.join(cache, marketplace, 'literati', version, 'mcp', 'bundle.mjs');\n      try {\n        const mtime = fs.statSync(file).mtimeMs;\n        if (!best || mtime > best.mtime) best = { file, mtime };\n      } catch {\n        /* not a plugin version dir */\n      }\n    }\n  }\n  return best && best.file;\n}\n\nconst bundle = fs.existsSync(copy) ? copy : newestCachedBundle();\nif (!bundle) {\n  console.error('Literati: MCP server bundle not found. Reinstall the Literati plugin (codex plugin add literati@literati), approve its hook in /hooks, then restart Codex.');\n  process.exit(1);\n}\nimport(pathToFileURL(bundle).href);\n"
+      ],
+      "env_vars": [
+        "LITERATI_SERVER_URL",
+        "CODEX_HOME"
+      ],
+      "startup_timeout_sec": 60,
+      "tool_timeout_sec": 600
+    }
+  }
+}
