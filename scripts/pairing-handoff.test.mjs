@@ -14,7 +14,7 @@ const CREDENTIALS = fileURLToPath(new URL('../lib/credentials.mjs', import.meta.
 /** Run a snippet in a FRESH node process with an isolated HOME. */
 function inProcess(home, body) {
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import {savePendingPairing,loadPendingPairing,clearPendingPairing,PENDING_PATH} from ${JSON.stringify(CREDENTIALS)};${body}`], {
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, HOME: home, FORCE_COLOR: '0' },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr);
