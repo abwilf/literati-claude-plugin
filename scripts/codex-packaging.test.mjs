@@ -84,28 +84,80 @@ function fakeBundle(file, label) {
   writeFileSync(file, `console.log(${JSON.stringify(label)} + ' ' + process.cwd());\n`);
 }
 
-test('launcher runs the hook-maintained copy, in the session folder', (t) => {
+const cachedBundle = (codexHome, marketplace, version) =>
+  join(codexHome, 'plugins', 'cache', marketplace, 'literati', version, 'mcp', 'bundle.mjs');
+
+test('launcher runs the installed (cached) bundle, in the session folder — even right after an update', (t) => {
   const home = tempHome(t);
-  fakeBundle(join(home, '.literati', 'mcp', 'codex', 'bundle.mjs'), 'copy');
-  fakeBundle(join(home, '.codex', 'plugins', 'cache', 'literati', 'literati', '0.6.7', 'mcp', 'bundle.mjs'), 'cache');
+  // The hook's copy is still the previous version: it only refreshes on the
+  // first turn, after this server has started.
+  fakeBundle(join(home, '.literati', 'mcp', 'codex', 'bundle.mjs'), 'stale-copy');
+  fakeBundle(cachedBundle(join(home, '.codex'), 'literati', '0.7.0'), 'installed');
   const r = runLauncher(home);
   assert.equal(r.status, 0, r.stderr);
   // The bundle resolves the paired project from its working directory.
-  assert.equal(r.stdout.trim(), `copy ${realpathSync(home)}`);
+  assert.equal(r.stdout.trim(), `installed ${realpathSync(home)}`);
 });
 
-test('launcher falls back to the newest cached bundle before the hook has run', (t) => {
+test('launcher picks the highest version, not the newest file date', (t) => {
   const home = tempHome(t);
   const codexHome = join(home, 'custom-codex-home');
-  const older = join(codexHome, 'plugins', 'cache', 'literati', 'literati', '0.6.6', 'mcp', 'bundle.mjs');
-  const newer = join(codexHome, 'plugins', 'cache', 'other-marketplace', 'literati', '0.6.7', 'mcp', 'bundle.mjs');
-  fakeBundle(older, 'old');
-  fakeBundle(newer, 'new');
-  const past = new Date(Date.now() - 60_000);
-  utimesSync(older, past, past);
+  const files = {
+    '0.6.7': cachedBundle(codexHome, 'literati', '0.6.7'),
+    '0.10.0': cachedBundle(codexHome, 'literati', '0.10.0'),
+    '0.10.0-beta.1': cachedBundle(codexHome, 'literati', '0.10.0-beta.1'),
+    '0.9.9': cachedBundle(codexHome, 'literati', '0.9.9'),
+  };
+  for (const [version, file] of Object.entries(files)) fakeBundle(file, version);
+  // Codex keeps the source file's date on install, so dates say nothing about
+  // which version is newer: make the highest version the OLDEST file.
+  const past = new Date(Date.now() - 3_600_000);
+  utimesSync(files['0.10.0'], past, past);
   const r = runLauncher(home, codexHome);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^new /);
+  assert.match(r.stdout, /^0\.10\.0 /);
+});
+
+test('launcher prefers the official marketplace over a higher version left in another one', (t) => {
+  const home = tempHome(t);
+  const codexHome = join(home, 'codex');
+  fakeBundle(cachedBundle(codexHome, 'literati', '0.7.0'), 'official');
+  fakeBundle(cachedBundle(codexHome, 'literati-spike', '0.8.0-spike.1'), 'leftover');
+  const r = runLauncher(home, codexHome);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^official /);
+});
+
+test('launcher uses another marketplace when the official one is not installed', (t) => {
+  const home = tempHome(t);
+  const codexHome = join(home, 'codex');
+  fakeBundle(cachedBundle(codexHome, 'my-fork', '0.7.1'), 'fork');
+  const r = runLauncher(home, codexHome);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^fork /);
+});
+
+test('launcher orders versions the way Codex does', (t) => {
+  for (const [versions, winner] of [
+    [['1.0.0-beta.9', '1.0.0-beta.10'], '1.0.0-beta.10'],
+    [['1.0.0-alpha', '1.0.0'], '1.0.0'],
+    [['0.7.0', 'local'], 'local'],
+  ]) {
+    const home = tempHome(t);
+    const codexHome = join(home, 'codex');
+    for (const v of versions) fakeBundle(cachedBundle(codexHome, 'literati', v), v);
+    const r = runLauncher(home, codexHome);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.split(' ')[0], winner, versions.join(' vs '));
+  }
+});
+
+test('launcher falls back to the hook copy when the plugin cache is not where it expects', (t) => {
+  const home = tempHome(t);
+  fakeBundle(join(home, '.literati', 'mcp', 'codex', 'bundle.mjs'), 'copy');
+  const r = runLauncher(home, join(home, 'missing'));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^copy /);
 });
 
 test('launcher explains itself when no bundle exists anywhere', (t) => {

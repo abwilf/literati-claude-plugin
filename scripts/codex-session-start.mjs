@@ -1,21 +1,21 @@
 #!/usr/bin/env node
-// Codex SessionStart hook: maintain the stable MCP bundle copy Codex runs.
+// Codex SessionStart hook: maintain a stable fallback copy of the MCP bundle.
 //
 // Codex does not expand ${PLUGIN_ROOT} in a plugin's MCP server config, so
 // codex/mcp.json cannot point at mcp/bundle.mjs inside the (versioned) plugin
-// install dir. Hooks do get the plugin root, so — the same trick the Claude
-// Code hook uses — this copies the bundle to a fixed path that codex/mcp.json
-// runs: ~/.literati/mcp/codex/bundle.mjs.
+// install dir. The launcher there finds the installed bundle in Codex's plugin
+// cache itself; should that cache ever not be where it expects, it runs this
+// copy instead. Hooks do get the plugin root, so — the same trick the Claude
+// Code hook uses — this copies the bundle to ~/.literati/mcp/codex/bundle.mjs.
 //
 // Deliberately NOT Claude Code's copy (~/.literati/mcp/bundle.mjs): with both
 // clients installed at different plugin versions they would overwrite each
 // other's bundle on every session start.
 //
 // Codex runs SessionStart hooks at the start of the first turn, after MCP
-// servers have started, so an update takes effect from the next Codex session
-// (until the first copy exists, the launcher in codex/mcp.json runs the bundle
-// from Codex's plugin cache). Always exits 0 and prints nothing to stdout; a
-// failure gets one line on stderr.
+// servers have started, so this copy trails an update by a session — which is
+// why the launcher prefers the cache. Always exits 0 and prints nothing to
+// stdout; a failure gets one line on stderr.
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, renameSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';

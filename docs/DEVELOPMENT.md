@@ -118,15 +118,19 @@ Claude Code ignores, and from there two Codex-only files:
 
 - `codex/mcp.json` — the MCP server. Codex does not expand `${PLUGIN_ROOT}` in
   a plugin's server config, so the server is a small shell-free launcher
-  (`node -e`, works on Windows) that runs `~/.literati/mcp/codex/bundle.mjs`, or
-  — before that copy exists — the newest bundle in Codex's plugin cache. The
-  launcher source is `scripts/codex-launcher.cjs`; `codex/mcp.json` embeds it
-  verbatim (a test fails if they drift). No `cwd`, so the server starts in the
-  folder Codex runs in — that is what selects the paired project.
+  (`node -e`, works on Windows) that runs the bundle of the highest installed
+  plugin version in Codex's plugin cache — from the official `literati`
+  marketplace when it is installed, otherwise from any other — so an update
+  takes effect in the next session; or, should the cache not be where it expects,
+  `~/.literati/mcp/codex/bundle.mjs`. It compares versions, not file dates
+  (Codex keeps the source files' dates on install). The launcher source is
+  `scripts/codex-launcher.cjs`; `codex/mcp.json` embeds it verbatim (a test
+  fails if they drift). No `cwd`, so the server starts in the folder Codex
+  runs in — that is what selects the paired project.
 - `codex/hooks.json` — SessionStart only: `scripts/codex-session-start.mjs`
-  keeps `~/.literati/mcp/codex/bundle.mjs` current. Never Claude Code's copy
-  (the two clients would overwrite each other), and none of the transcript
-  hooks (they would upload Codex sessions as Claude Code ones).
+  keeps that fallback copy current. Never Claude Code's copy (the two clients
+  would overwrite each other), and none of the transcript hooks (they would
+  upload Codex sessions as Claude Code ones).
 
 Never add a root `.mcp.json`: Claude Code would start it as a second server
 next to the user-scope one and every tool would show up twice.
@@ -134,8 +138,9 @@ next to the user-scope one and every tool would show up twice.
 Differences from Claude Code:
 
 - Codex asks the user to trust the hook once (`/hooks`), and runs SessionStart
-  hooks at the start of the first turn — so a plugin update takes effect from
-  the next Codex session.
+  hooks at the start of the first turn, after MCP servers have started — so the
+  fallback copy trails an update by a session (the launcher prefers the cache,
+  so this only matters if the cache can't be found).
 - Codex lists tools once per session and ignores `tools/list_changed`, so the
   server advertises the full catalog (`mcp/tool-catalog.json`) to Codex before
   the folder is paired; calls answer "not logged in" until it is.
