@@ -39,11 +39,13 @@ export function tempHome(t, serverUrl) {
  * Start the server as `clientName` in `home`, run `requests` in order.
  * Returns `{ init, results }` — the initialize result and each request's result.
  */
-export async function session(home, clientName, requests, { serverUrl = DEAD_SERVER } = {}) {
+export async function session(home, clientName, requests, { serverUrl = DEAD_SERVER, env = {} } = {}) {
   const child = spawn(process.execPath, [BUNDLE], {
     cwd: home,
-    // Unpaired calls resolve against this; nothing here may reach a real server.
-    env: { ...process.env, HOME: home, LITERATI_SERVER_URL: serverUrl },
+    // Unpaired calls resolve against this; nothing here may reach a real server
+    // — nor a real desktop app (pass `env` with a LITERATI_CONNECTOR_URL to
+    // test desktop pairing against a stub).
+    env: { ...process.env, HOME: home, LITERATI_SERVER_URL: serverUrl, LITERATI_DESKTOP_PAIR: '0', ...env },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   const exited = once(child, 'exit').then(([code]) => {

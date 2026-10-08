@@ -143,7 +143,7 @@ const WELCOME_BANNER = `Welcome to the Literati for Claude Code plugin! 🎉
 
 This plugin lets you work on Literati research project files right from Claude Code - read and edit your LaTeX files, compile and debug the PDF, search for and add papers to your bibliography, stage and commit, all synced in real time and viewable by yourself and your collaborators on the web & desktop apps. Claude operates on your behalf - each edit appears as your own. This should feel like using Claude Code on your own filesystem, but have all the benefits of real-time collaboration that Literati offers on the server side.
 
-To get connected, run /literati:login (or just paste your *Literati project URL* — you'll find it on the project page in the Literati web app). Claude will register the Literati tools, kick off the login (you'll approve it in the web app and drop a one-time code back here), and tell you when to restart. Logins are directory-specific: pair each project directory once.
+To get connected, run /literati:login. Claude will register the Literati tools and kick off the login: with the Literati desktop app installed, a Literati window opens where you pick the project and click Accept; otherwise Claude asks for your *Literati project URL* and you approve in the web app and drop a one-time code back here. Claude tells you when to restart. Logins are directory-specific: pair each project directory once.
 
 This message only appears once. Claude can answer any additional questions you have about how to use it.`;
 
@@ -164,7 +164,7 @@ async function main() {
       emit(
         [
           'The user just installed the Literati plugin and was shown a one-time welcome banner (by the system, not you) explaining the plugin and pointing them at /literati:login. Do NOT repeat the welcome.',
-          'If their message contains a Literati project URL (or a project id/slug), run the /literati:login flow with it (it registers the user-scope `literati` MCP server and completes pairing via the plugin\'s scripts/login.mjs).',
+          'If they ask to connect/pair/log in, or their message contains a Literati project URL (or a project id/slug), run the /literati:login flow (with the URL if given — do not ask for one first; it registers the user-scope `literati` MCP server and completes pairing via the plugin\'s scripts/login.mjs, through the Literati desktop app when installed).',
           'If they ask questions about the plugin, answer them; otherwise help with whatever they came to do and mention they can connect anytime via /literati:login.',
         ].join('\n'),
         WELCOME_BANNER,
@@ -175,7 +175,7 @@ async function main() {
       [
         'The Literati plugin is installed but this directory is not yet paired with a Literati project, so Literati tools will not work.',
         registered
-          ? 'When the user first asks for anything Literati-related (or at the start of the conversation if they seem to be here for Literati), offer to log them in: ask for their Literati project URL, then run the /literati:login flow.'
+          ? 'When the user first asks for anything Literati-related (or at the start of the conversation if they seem to be here for Literati), offer to log them in, then run the /literati:login flow (do not ask for a project URL first — with the Literati desktop app they pick the project there; the flow asks for a URL only if needed).'
           : 'The `literati` MCP server is also not registered yet. When the user wants Literati, run the /literati:login flow — it registers the server and pairs this directory.',
       ].join('\n'),
     );

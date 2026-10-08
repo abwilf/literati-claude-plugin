@@ -55,9 +55,18 @@ the env var did not reach the server — re-pair with it set.
 
 ## Log in
 
-Run `/literati:login` (or just paste your project URL — it looks like
-`https://literati.ai/projects/<id>`, or `http://localhost:3010/project/<id>`
-in dev; a bare project id also works):
+Run `/literati:login`.
+
+**With the Literati desktop app installed** (signed in, against the same server
+as the plugin): a Literati window opens (launched via `literati://cli-pair` if it
+isn't running); pick the project and click Accept. Nothing to paste — the plugin
+gets the code from the app's local connector (`127.0.0.1:21279`, override with
+`LITERATI_CONNECTOR_URL`; set `LITERATI_DESKTOP_PAIR=0` to skip the app).
+
+**Otherwise** (no desktop app, or it is connected to a different server) it falls
+back to a pairing code, which needs your project URL — it looks like
+`https://literati.ai/projects/<id>`, or `http://localhost:3010/project/<id>` in
+dev; a bare project id also works:
 
 1. Give Claude your project URL.
 2. Open that project in the Literati web app; approve the "Claude Code

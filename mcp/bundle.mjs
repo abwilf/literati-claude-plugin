@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
+      let _sch = resolve3.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref) {
+    function resolve3(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3643,7 +3643,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3907,7 +3907,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -14217,7 +14217,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -14234,7 +14234,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -14312,7 +14312,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve2(parseResult.data);
+            resolve3(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -14573,12 +14573,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve2, interval);
+      const timeoutId = setTimeout(resolve3, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -15448,12 +15448,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve2) => {
+    return new Promise((resolve3) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve2();
+        resolve3();
       } else {
-        this._stdout.once("drain", resolve2);
+        this._stdout.once("drain", resolve3);
       }
     });
   }
@@ -15994,22 +15994,256 @@ var tool_catalog_default = {
   ]
 };
 
+// ../lib/pairing.mjs
+import { execFile } from "node:child_process";
+import { resolve as resolve2 } from "node:path";
+var CONNECTOR_URL = process.env.LITERATI_CONNECTOR_URL || "http://127.0.0.1:21279";
+var CONNECTOR_HEADERS = { "X-Literati-Connector": "1" };
+var DEEP_LINK = "literati://cli-pair";
+var normalizeServerUrl = (u) => String(u ?? "").replace(/\/+$/, "");
+async function exchangePairingCode({ serverUrl, requestId, code, cwd, headers = {} }) {
+  let res;
+  try {
+    res = await fetch(`${serverUrl}/cli/pairing/requests/${requestId}/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ code }),
+      signal: AbortSignal.timeout(15e3)
+    });
+  } catch (err) {
+    return { ok: false, reason: "network", message: `Could not reach the Literati server: ${err.message}` };
+  }
+  if (!res.ok) {
+    const body2 = await res.json().catch(() => ({}));
+    if (body2?.code === "PAIRING_INVALID_CODE") {
+      return { ok: false, reason: "invalid_code", message: "That code is not correct." };
+    }
+    return {
+      ok: false,
+      reason: "terminal",
+      message: "Pairing could not be completed (expired, denied, or too many attempts)."
+    };
+  }
+  const body = await res.json();
+  addProjectCredential(
+    {
+      serverUrl,
+      token: body.token,
+      collectionId: body.collectionId,
+      workspaceId: body.workspaceId,
+      userId: body.userId,
+      projectSlug: body.projectSlug,
+      projectName: body.projectName
+    },
+    cwd
+  );
+  return { ok: true, body };
+}
+function requestSignal(outer, timeoutMs) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  if (!outer) return timeout;
+  const c = new AbortController();
+  const follow = (s) => () => c.abort(s.reason);
+  if (outer.aborted) c.abort(outer.reason);
+  outer.addEventListener("abort", follow(outer), { once: true });
+  timeout.addEventListener("abort", follow(timeout), { once: true });
+  return c.signal;
+}
+async function connector(connectorUrl, path, { method = "GET", body, timeoutMs, signal, client }) {
+  const headers = { ...CONNECTOR_HEADERS, ...client ? { "X-Literati-Client": client } : {} };
+  return fetch(`${connectorUrl}${path}`, {
+    method,
+    headers: body ? { ...headers, "Content-Type": "application/json" } : headers,
+    body: body ? JSON.stringify(body) : void 0,
+    signal: requestSignal(signal, timeoutMs)
+  });
+}
+function cancelPair(connectorUrl, pairId, client) {
+  return connector(connectorUrl, `/cli-pair/${encodeURIComponent(pairId)}`, {
+    method: "DELETE",
+    timeoutMs: 2e3,
+    client
+  }).catch(() => {
+  });
+}
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function withCancellation(fn, outer) {
+  const c = new AbortController();
+  let caught = null;
+  const onSignal = (sig) => {
+    caught = sig;
+    c.abort();
+  };
+  const onOuter = () => c.abort();
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  if (outer?.aborted) c.abort();
+  outer?.addEventListener("abort", onOuter, { once: true });
+  try {
+    return await fn(c.signal);
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    outer?.removeEventListener("abort", onOuter);
+    if (caught) process.exit(caught === "SIGINT" ? 130 : 143);
+  }
+}
+async function probe(connectorUrl, client) {
+  let res;
+  try {
+    res = await connector(connectorUrl, "/cli-pair/hello", { timeoutMs: 1e3, client });
+  } catch {
+    return { reachable: false };
+  }
+  const hello = res.ok ? await res.json().catch(() => null) : null;
+  return { reachable: true, hello: hello?.app === "literati" ? hello : null };
+}
+function launchDesktopApp() {
+  const [cmd, args] = process.platform === "darwin" ? ["open", [DEEP_LINK]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", DEEP_LINK]] : ["xdg-open", [DEEP_LINK]];
+  return new Promise((done) => {
+    try {
+      execFile(cmd, args, { timeout: 1e4 }, (err) => done(!err));
+    } catch {
+      done(false);
+    }
+  });
+}
+async function desktopPair({
+  serverUrl,
+  cwd,
+  requesterLabel,
+  project,
+  client,
+  connectorUrl = CONNECTOR_URL,
+  launch = launchDesktopApp,
+  launchWaitMs = 3e4,
+  probeIntervalMs = 1e3,
+  pollDeadlineMs = 3 * 6e4 + 15e3,
+  signal
+}) {
+  if (process.env.LITERATI_DESKTOP_PAIR === "0") return { kind: "unavailable" };
+  let p = await probe(connectorUrl, client);
+  if (!p.reachable && await launch()) {
+    const until = Date.now() + launchWaitMs;
+    while (!p.reachable && Date.now() < until && !signal?.aborted) {
+      await sleep(probeIntervalMs);
+      p = await probe(connectorUrl, client);
+    }
+  }
+  if (!p.reachable || !p.hello) return { kind: "unavailable" };
+  if (normalizeServerUrl(p.hello.serverUrl) !== normalizeServerUrl(serverUrl)) {
+    return { kind: "server_mismatch", appServerUrl: normalizeServerUrl(p.hello.serverUrl) };
+  }
+  if (!p.hello.signedIn) return { kind: "signed_out" };
+  if (signal?.aborted) return { kind: "cancelled" };
+  let res;
+  try {
+    res = await connector(connectorUrl, "/cli-pair", {
+      method: "POST",
+      body: {
+        cwd: resolve2(cwd),
+        requesterLabel,
+        ...project ? { project } : {},
+        ...client ? { client } : {}
+      },
+      timeoutMs: 1e4,
+      client
+    });
+  } catch (err) {
+    return { kind: "error", message: `Could not reach the Literati desktop app: ${err.message}` };
+  }
+  if (res.status === 401) return { kind: "signed_out" };
+  if (res.status === 409) return { kind: "busy" };
+  if (!res.ok) return { kind: "error", message: `The Literati desktop app refused the pairing request (HTTP ${res.status}).` };
+  const { pairId } = await res.json().catch(() => ({}));
+  if (!pairId) return { kind: "error", message: "The Literati desktop app returned an unexpected response." };
+  const deadline = Date.now() + pollDeadlineMs;
+  while (Date.now() < deadline) {
+    const polledAt = Date.now();
+    try {
+      res = await connector(connectorUrl, `/cli-pair/${encodeURIComponent(pairId)}`, {
+        timeoutMs: Math.min(3e4, Math.max(1e3, deadline - Date.now())),
+        signal,
+        client
+      });
+    } catch (err) {
+      if (signal?.aborted) {
+        await cancelPair(connectorUrl, pairId, client);
+        return { kind: "cancelled" };
+      }
+      if (err?.name === "TimeoutError") continue;
+      return { kind: "error", message: `Lost contact with the Literati desktop app: ${err.message}` };
+    }
+    if (res.status === 404) return { kind: "expired" };
+    if (!res.ok) return { kind: "error", message: `The Literati desktop app returned HTTP ${res.status}.` };
+    const body = await res.json().catch(() => ({}));
+    if (body.status === "pending") {
+      const elapsed = Date.now() - polledAt;
+      if (elapsed < 1e3) await sleep(Math.min(1e3 - elapsed, Math.max(0, deadline - Date.now())));
+      if (signal?.aborted) {
+        await cancelPair(connectorUrl, pairId, client);
+        return { kind: "cancelled" };
+      }
+      continue;
+    }
+    if (body.status === "approved" && body.requestId && body.code) {
+      return {
+        kind: "approved",
+        requestId: body.requestId,
+        code: body.code,
+        projectName: body.projectName,
+        projectSlug: body.projectSlug
+      };
+    }
+    if (body.status === "denied") return { kind: "denied" };
+    if (body.status === "expired") return { kind: body.reason === "not_shown" ? "not_shown" : "expired" };
+    return { kind: "error", message: "The Literati desktop app returned an unexpected response." };
+  }
+  await cancelPair(connectorUrl, pairId, client);
+  return { kind: "timeout" };
+}
+function desktopOutcomeMessage(outcome, retry) {
+  switch (outcome.kind) {
+    case "signed_out":
+      return `The Literati desktop app is open but not signed in. Ask the user to sign in there, then ${retry}.`;
+    case "busy":
+      return `The Literati desktop app already has a pairing request open. Ask the user to finish or dismiss it there, then ${retry}.`;
+    case "denied":
+      return "The user declined the pairing request in the Literati desktop app. Nothing was paired.";
+    case "expired":
+      return `The pairing request in the Literati desktop app expired before it was accepted. To try again, ${retry}.`;
+    case "not_shown":
+      return "Literati couldn't show the pairing window \u2014 open the Literati app, make sure you're signed in, then try again.";
+    case "timeout":
+      return `The Literati desktop app stopped responding to the pairing request. When the user is ready, ${retry}.`;
+    case "cancelled":
+      return "Pairing was cancelled; the request in the Literati desktop app was withdrawn.";
+    default:
+      return outcome.message ?? "Pairing via the Literati desktop app failed.";
+  }
+}
+function desktopFallbackNote(outcome, serverUrl) {
+  if (outcome.kind === "server_mismatch") {
+    return `Note: the Literati desktop app is connected to ${outcome.appServerUrl}, but this plugin pairs against ${normalizeServerUrl(serverUrl)}, so the app can't be used here \u2014 falling back to a pairing code.`;
+  }
+  return "";
+}
+
 // index.mjs
 var activeCredential = () => getCredentialForDir(process.cwd());
 var DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || "https://api.literati.ai";
 var EXECUTE_TIMEOUT_MS = 9 * 6e4;
 var LOGIN_TOOL = {
   name: "literati_login",
-  description: "Pair this folder with a Literati project. Call this whenever the user gives a Literati project URL (\u2026/project/<id>) or asks to connect or log in to Literati \u2014 pair with this tool rather than fetching or curling the URL to connect (opening it in the user's browser for them is fine). If they have not given one, ask for their Literati project URL (or project id/slug) first. It sends an approval prompt to the project page in the Literati web app.",
+  description: `Pair this folder with a Literati project. Call this whenever the user asks to connect or log in to Literati, or gives a Literati project URL (\u2026/project/<id>) \u2014 pair with this tool rather than fetching or curling the URL to connect (opening it in the user's browser for them is fine). If the Literati desktop app is installed it opens a project picker there; otherwise it needs a project URL/slug and uses a pairing code. Do not ask for a project URL up front \u2014 call this with none unless the user already gave one. BEFORE calling, tell the user: "If you have the Literati desktop app, a window will open \u2014 pick the project and click Accept." The call waits (up to ~3 minutes) for them to accept in the app. If the result says it needs a project URL, ask the user for it and call again with it.`,
   inputSchema: {
     type: "object",
     properties: {
       project_url: {
         type: "string",
-        description: "The Literati project URL (https://literati.ai/projects/<id>) or bare project id/slug."
+        description: "Optional. The Literati project URL (https://literati.ai/projects/<id>) or bare project id/slug. Preselects the project in the desktop app; required only for the pairing-code fallback."
       }
     },
-    required: ["project_url"],
     additionalProperties: false
   }
 };
@@ -16029,7 +16263,7 @@ var pendingPairing = null;
 var remoteTools = null;
 var FALLBACK_INSTRUCTIONS = [
   "Literati manages LaTeX research projects with server-side files and a paper library.",
-  `When the user gives a Literati project URL or asks to connect Literati, pair by calling literati_login with it \u2014 don't fetch or curl the URL to connect (opening it in the user's browser for them is fine). If Literati tools are missing or a Literati tool fails with "Not logged in", pair the same way (ask the user for their project URL).`,
+  `When the user gives a Literati project URL or asks to connect Literati, pair by calling literati_login (with the URL if given) \u2014 don't fetch or curl the URL to connect (opening it in the user's browser for them is fine). If Literati tools are missing or a Literati tool fails with "Not logged in", pair the same way (no project URL needed up front if the user has the Literati desktop app).`,
   "NEVER hand-edit .bib bibliography files \u2014 add references with the add_paper tool (hand-written BibTeX risks hallucinated citations); .bib edits require explicit in-app user approval.",
   "After editing .tex/.bib/.sty files, run the compile tool and fix errors before finishing.",
   "Only use stage_changes / commit_changes when the user explicitly asks."
@@ -16104,11 +16338,45 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   }
   return { tools };
 });
-async function handleLogin(args) {
+async function handleLogin(args, signal) {
   const projectUrl = String(args?.project_url ?? "").trim();
-  if (!projectUrl) return text("project_url is required.", true);
   const serverUrl = DEFAULT_SERVER_URL;
   const requesterLabel = `${os.userInfo().username}@${os.hostname()}`;
+  const desktop = await withCancellation(
+    (sig) => desktopPair({
+      serverUrl,
+      cwd: process.cwd(),
+      requesterLabel,
+      project: projectUrl || void 0,
+      client: clientKind(),
+      signal: sig
+    }),
+    signal
+  );
+  if (desktop.kind === "approved") {
+    const r = await exchangePairingCode({
+      serverUrl,
+      requestId: desktop.requestId,
+      code: desktop.code,
+      cwd: process.cwd(),
+      headers: clientHeaders()
+    });
+    if (!r.ok) return text(`${r.message} Call literati_login again to retry.`, true);
+    return finishLogin(r.body);
+  }
+  if (desktop.kind !== "unavailable" && desktop.kind !== "server_mismatch") {
+    return text(desktopOutcomeMessage(desktop, "call literati_login again"), true);
+  }
+  const note = desktopFallbackNote(desktop, serverUrl);
+  if (!projectUrl) {
+    return text(
+      [
+        note || "The Literati desktop app is not available on this machine, so pairing uses a one-time code instead.",
+        "Ask the user for their Literati project URL (https://literati.ai/projects/<id>, or a bare project id), then call literati_login again with project_url."
+      ].join("\n"),
+      true
+    );
+  }
   let res;
   try {
     res = await fetch(`${serverUrl}/cli/pairing/requests`, {
@@ -16131,6 +16399,7 @@ async function handleLogin(args) {
   savePendingPairing(pendingPairing);
   return text(
     [
+      ...note ? [note] : [],
       "Pairing request sent.",
       "Tell the user to:",
       "  1. Open the project page in the Literati web app (the URL they gave you).",
@@ -16146,27 +16415,20 @@ async function handleLoginCode(args) {
   if (!code) return text("code is required.", true);
   const pending = loadPendingPairing() ?? (isPairingFresh(pendingPairing) ? pendingPairing : null);
   if (!pending) {
-    return text("No pairing in progress \u2014 call literati_login with the project URL first.", true);
+    return text("No pairing in progress \u2014 call literati_login first.", true);
   }
-  let res;
-  try {
-    res = await fetch(
-      `${pending.serverUrl}/cli/pairing/requests/${pending.requestId}/exchange`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...clientHeaders() },
-        body: JSON.stringify({ code }),
-        signal: AbortSignal.timeout(15e3)
-      }
-    );
-  } catch (err) {
-    return text(`Could not reach the Literati server: ${err.message}`, true);
+  const r = await exchangePairingCode({
+    serverUrl: pending.serverUrl,
+    requestId: pending.requestId,
+    code,
+    cwd: pending.cwd ?? process.cwd(),
+    headers: clientHeaders()
+  });
+  if (r.reason === "network") return text(r.message, true);
+  if (r.reason === "invalid_code") {
+    return text("That code is not correct \u2014 ask the user to re-check it and try again.", true);
   }
-  if (!res.ok) {
-    const body2 = await res.json().catch(() => ({}));
-    if (body2?.code === "PAIRING_INVALID_CODE") {
-      return text("That code is not correct \u2014 ask the user to re-check it and try again.", true);
-    }
+  if (!r.ok) {
     pendingPairing = null;
     clearPendingPairing();
     return text(
@@ -16174,21 +16436,11 @@ async function handleLoginCode(args) {
       true
     );
   }
-  const body = await res.json();
-  addProjectCredential(
-    {
-      serverUrl: pending.serverUrl,
-      token: body.token,
-      collectionId: body.collectionId,
-      workspaceId: body.workspaceId,
-      userId: body.userId,
-      projectSlug: body.projectSlug,
-      projectName: body.projectName
-    },
-    pending.cwd ?? process.cwd()
-  );
   pendingPairing = null;
   clearPendingPairing();
+  return finishLogin(r.body);
+}
+async function finishLogin(body) {
   remoteTools = await fetchRemoteTools();
   try {
     await server.sendToolListChanged();
@@ -16207,7 +16459,7 @@ async function handleRemoteTool(name, args) {
   const cred = activeCredential();
   if (!cred) {
     return text(
-      "Not logged in to Literati. Ask the user for their Literati project URL and call literati_login.",
+      "Not logged in to Literati. Call literati_login to pair this directory (it asks for a project URL only if the Literati desktop app is unavailable).",
       true
     );
   }
@@ -16276,9 +16528,9 @@ function renderExecuteResult(body) {
   }
   return text(parts.join("\n\n") || "(no output)", body.success === false);
 }
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
+server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const { name, arguments: args } = req.params;
-  if (name === "literati_login") return handleLogin(args);
+  if (name === "literati_login") return handleLogin(args, extra?.signal);
   if (name === "literati_login_code") return handleLoginCode(args);
   return handleRemoteTool(name, args);
 });
