@@ -80,13 +80,26 @@ and bump the plugin version so installs pick it up:
 
 ```bash
 cd mcp && npm install && npm run build       # regenerates mcp/bundle.mjs
-# bump "version" in .claude-plugin/plugin.json, commit, push, then:
+# bump "version" in BOTH .claude-plugin/plugin.json and .codex-plugin/plugin.json
+# (a test fails if they differ), commit, push, then:
 claude plugin update literati@literati
 ```
 
 The version bump matters twice: it ships the new plugin AND triggers the
 SessionStart hook to refresh the stable bundle copy at
 `~/.literati/mcp/bundle.mjs` (compared via `~/.literati/mcp/manifest.json`).
+
+When the server's tool list changes (`GET /mcp-agent/tools`), regenerate the
+catalog Codex sees before a folder is paired, then rebuild. Run it from a
+directory paired against production so the snapshot matches what users get:
+
+```bash
+node scripts/snapshot-tool-catalog.mjs <paired-dir>
+cd mcp && npm run build
+```
+
+Run the tests with `npm test` (rebuild the bundle first — the stdio tests
+drive `mcp/bundle.mjs`).
 
 For development, you can point the registration at your checkout directly:
 
@@ -95,6 +108,46 @@ claude mcp add --scope user literati -e LITERATI_SERVER_URL=http://localhost:300
 ```
 
 See [TESTING.md](../TESTING.md) for the manual test passes.
+
+## Codex
+
+The same plugin installs in OpenAI Codex (`codex plugin marketplace add
+abwilf/literati-claude-plugin`, then `codex plugin add literati@literati`), with
+the same per-folder pairing. Codex reads `.codex-plugin/plugin.json`, which
+Claude Code ignores, and from there two Codex-only files:
+
+- `codex/mcp.json` — the MCP server. Codex does not expand `${PLUGIN_ROOT}` in
+  a plugin's server config, so the server is a small shell-free launcher
+  (`node -e`, works on Windows) that runs the bundle of the highest installed
+  plugin version in Codex's plugin cache — from the official `literati`
+  marketplace when it is installed, otherwise from any other — so an update
+  takes effect in the next session; or, should the cache not be where it expects,
+  `~/.literati/mcp/codex/bundle.mjs`. It compares versions, not file dates
+  (Codex keeps the source files' dates on install). The launcher source is
+  `scripts/codex-launcher.cjs`; `codex/mcp.json` embeds it verbatim (a test
+  fails if they drift). No `cwd`, so the server starts in the folder Codex
+  runs in — that is what selects the paired project.
+- `codex/hooks.json` — SessionStart only: `scripts/codex-session-start.mjs`
+  keeps that fallback copy current. Never Claude Code's copy (the two clients
+  would overwrite each other), and none of the transcript hooks (they would
+  upload Codex sessions as Claude Code ones).
+
+Never add a root `.mcp.json`: Claude Code would start it as a second server
+next to the user-scope one and every tool would show up twice.
+
+Differences from Claude Code:
+
+- Codex asks the user to trust the hook once (`/hooks`), and runs SessionStart
+  hooks at the start of the first turn, after MCP servers have started — so the
+  fallback copy trails an update by a session (the launcher prefers the cache,
+  so this only matters if the cache can't be found).
+- Codex lists tools once per session and ignores `tools/list_changed`, so the
+  server advertises the full catalog (`mcp/tool-catalog.json`) to Codex before
+  the folder is paired; calls answer "not logged in" until it is.
+- Codex passes MCP servers only an allowlisted environment; `codex/mcp.json`
+  forwards `LITERATI_SERVER_URL` (and `CODEX_HOME`). For a local server, start
+  Codex with it set, e.g. `LITERATI_SERVER_URL=http://localhost:3000 codex
+  --no-daemon` (a background daemon started earlier would not have it).
 
 ## How syncing works
 

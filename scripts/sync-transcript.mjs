@@ -61,6 +61,8 @@ async function main() {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${cred.token}`,
+        // Claude Code-only hook (labels only — see clientHeaders in mcp/index.mjs).
+        'X-Literati-Client': 'claude-code',
       },
       body: JSON.stringify({ claudeSessionId: sessionId, transcript }),
       signal: AbortSignal.timeout(25_000),

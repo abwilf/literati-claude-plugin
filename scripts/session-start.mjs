@@ -111,7 +111,8 @@ function mcpServerRegistered() {
 async function fetchProjectContext(cred) {
   try {
     const res = await fetch(`${cred.serverUrl}/mcp-agent/context`, {
-      headers: { Authorization: `Bearer ${cred.token}` },
+      // Claude Code-only hook (labels only — see clientHeaders in mcp/index.mjs).
+      headers: { Authorization: `Bearer ${cred.token}`, 'X-Literati-Client': 'claude-code' },
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return null;
