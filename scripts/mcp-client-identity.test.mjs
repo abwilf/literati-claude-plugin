@@ -137,7 +137,7 @@ test('login.mjs (Claude Code /literati:login) says claude-code and stays client-
   const run = (...args) =>
     execFileAsync(process.execPath, [join(ROOT, 'scripts', 'login.mjs'), ...args], {
       cwd: home,
-      env: { ...process.env, HOME: home, LITERATI_SERVER_URL: server.url },
+      env: { ...process.env, HOME: home, LITERATI_SERVER_URL: server.url, LITERATI_DESKTOP_PAIR: '0' },
       timeout: 15_000,
     });
   const started = await run('start', 'http://localhost:3010/project/abc');
@@ -156,3 +156,36 @@ test('after login, Claude Code still gets the tool count', { timeout: 30_000 }, 
   const { results } = await pairAndCall(t, 'claude-code');
   assert.match(textOf(results[2]), /Logged in to Literati project "Proj2"\. 1 Literati tools are now available\./);
 });
+
+// Desktop pairing: the app's connector learns which client is asking (for its
+// picker's wording) from the POST /cli-pair body, and every connector and
+// Literati request carries the same X-Literati-Client header.
+for (const [clientName, expected] of [
+  ['codex-mcp-client', 'codex'],
+  ['claude-code', 'claude-code'],
+  ['cursor-vscode', undefined],
+]) {
+  test(`${clientName}: desktop pairing sends client=${expected} to the connector`, { timeout: 30_000 }, async (t) => {
+    const server = await pairingServer(t);
+    const conn = await stubServer(t, {
+      'GET /cli-pair/hello': { app: 'literati', serverUrl: server.url, signedIn: true },
+      'POST /cli-pair': (_body, res) => {
+        res.statusCode = 202;
+        return { pairId: 'p1' };
+      },
+      'GET /cli-pair/p1': { status: 'approved', requestId: 'r1', code: 'CODE1234' },
+    });
+    const { results } = await session(tempHome(t), clientName, [callTool('literati_login')], {
+      serverUrl: server.url,
+      env: { LITERATI_DESKTOP_PAIR: '1', LITERATI_CONNECTOR_URL: conn.url },
+    });
+    assert.match(textOf(results[0]), /Logged in to Literati project "Proj2"/);
+    const post = conn.requests.find((r) => r.method === 'POST' && r.url === '/cli-pair');
+    assert.equal(post.body.client, expected);
+    if (expected === undefined) assert.ok(!('client' in post.body), 'unknown client: field omitted');
+    for (const req of conn.requests) assert.equal(header(req), expected, `connector ${req.method} ${req.url}`);
+    const ex = server.requests.find((r) => r.url === '/cli/pairing/requests/r1/exchange');
+    assert.equal(header(ex), expected, 'exchange');
+    assert.ok(!server.requests.some((r) => r.url === '/cli/pairing/requests'), 'no code-flow request');
+  });
+}
