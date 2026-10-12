@@ -9,8 +9,12 @@
 //     server-side tool list (GET /mcp-agent/tools) is exposed 1:1; calls
 //     proxy to POST /mcp-agent/tools/execute with the paired bearer token.
 //
-// Login is two tools (not one interactive flow) because MCP tools cannot
-// prompt the user — the model relays instructions between the tools.
+// Login: literati_login pairs through the Literati desktop app (the user picks
+// the project there and nothing needs pasting); without a usable app it
+// refuses and points the user at the download. The two-tool code flow remains
+// for an app connected to a different server (and LITERATI_DESKTOP_PAIR=0 in
+// development) — MCP tools cannot prompt the user, so the model relays the
+// one-time code from literati_login to literati_login_code.
 import os from 'node:os';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -19,7 +23,6 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
-  addProjectCredential,
   getCredentialForDir,
   savePendingPairing,
   loadPendingPairing,
@@ -28,6 +31,13 @@ import {
 } from '../lib/credentials.mjs';
 // Snapshot of the server's tool list (scripts/snapshot-tool-catalog.mjs).
 import TOOL_CATALOG from './tool-catalog.json' with { type: 'json' };
+import {
+  desktopPair,
+  desktopOutcomeMessage,
+  desktopFallbackNote,
+  exchangePairingCode,
+  withCancellation,
+} from '../lib/pairing.mjs';
 
 // Claude Code and Codex launch stdio MCP servers (user-scope registrations
 // included) in the session's working directory, so cwd-bound credentials resolve the
@@ -47,16 +57,15 @@ const EXECUTE_TIMEOUT_MS = 9 * 60_000; // compile can be slow
 const LOGIN_TOOL = {
   name: 'literati_login',
   description:
-    "Pair this folder with a Literati project. Call this whenever the user gives a Literati project URL (…/project/<id>) or asks to connect or log in to Literati — pair with this tool rather than fetching or curling the URL to connect (opening it in the user's browser for them is fine). If they have not given one, ask for their Literati project URL (or project id/slug) first. It sends an approval prompt to the project page in the Literati web app.",
+    "Pair this folder with a Literati project. Call this whenever the user asks to connect or log in to Literati, or gives a Literati project URL (…/project/<id>) — pair with this tool rather than fetching or curling the URL to connect (opening it in the user's browser for them is fine). Pairing goes through the Literati desktop app: it opens a project picker there (starting the app if needed); if the app isn't installed the call fails and tells the user where to download it — relay that, there is no other way to pair. Do not ask for a project URL up front — call this with none unless the user already gave one. BEFORE calling, tell the user: \"A Literati window will open — pick the project and click Accept.\" The call waits (up to ~3 minutes) for them to accept in the app. Only if the result says it needs a project URL (the app is connected to a different server), ask the user for it and call again with it.",
   inputSchema: {
     type: 'object',
     properties: {
       project_url: {
         type: 'string',
-        description: 'The Literati project URL (https://literati.ai/projects/<id>) or bare project id/slug.',
+        description: 'Optional. The Literati project URL (https://literati.ai/projects/<id>) or bare project id/slug. Preselects the project in the desktop app; required only when the result asks for it (pairing-code flow).',
       },
     },
-    required: ['project_url'],
     additionalProperties: false,
   },
 };
@@ -86,7 +95,7 @@ let remoteTools = null;
 // carries the safety-critical rules; the next session gets the real text.
 const FALLBACK_INSTRUCTIONS = [
   'Literati manages LaTeX research projects with server-side files and a paper library.',
-  "When the user gives a Literati project URL or asks to connect Literati, pair by calling literati_login with it — don't fetch or curl the URL to connect (opening it in the user's browser for them is fine). If Literati tools are missing or a Literati tool fails with \"Not logged in\", pair the same way (ask the user for their project URL).",
+  "When the user gives a Literati project URL or asks to connect Literati, pair by calling literati_login (with the URL if given) — don't fetch or curl the URL to connect (opening it in the user's browser for them is fine). If Literati tools are missing or a Literati tool fails with \"Not logged in\", pair the same way (no project URL needed up front — pairing goes through the Literati desktop app).",
   'NEVER hand-edit .bib bibliography files — add references with the add_paper tool (hand-written BibTeX risks hallucinated citations); .bib edits require explicit in-app user approval.',
   'After editing .tex/.bib/.sty files, run the compile tool and fix errors before finishing.',
   'Only use stage_changes / commit_changes when the user explicitly asks.',
@@ -192,12 +201,56 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
 });
 
-async function handleLogin(args) {
+async function handleLogin(args, signal) {
   const projectUrl = String(args?.project_url ?? '').trim();
-  if (!projectUrl) return text('project_url is required.', true);
-
   const serverUrl = DEFAULT_SERVER_URL;
   const requesterLabel = `${os.userInfo().username}@${os.hostname()}`;
+
+  // Desktop app first: the user picks the project there; nothing to paste.
+  // A cancelled tool call (or the server being killed) withdraws the request.
+  const desktop = await withCancellation(
+    (sig) =>
+      desktopPair({
+        serverUrl,
+        cwd: process.cwd(),
+        requesterLabel,
+        project: projectUrl || undefined,
+        client: clientKind(),
+        signal: sig,
+      }),
+    signal,
+  );
+  if (desktop.kind === 'approved') {
+    const r = await exchangePairingCode({
+      serverUrl,
+      requestId: desktop.requestId,
+      code: desktop.code,
+      cwd: process.cwd(),
+      headers: clientHeaders(),
+    });
+    if (!r.ok) return text(`${r.message} Call literati_login again to retry.`, true);
+    // A code-flow request left over from an earlier attempt is now moot.
+    pendingPairing = null;
+    clearPendingPairing();
+    return finishLogin(r.body);
+  }
+  // Every other outcome ends the attempt — including no usable app: pairing
+  // needs the desktop app, so there is no silent switch to the code flow.
+  if (desktop.kind !== 'disabled' && desktop.kind !== 'server_mismatch') {
+    return text(desktopOutcomeMessage(desktop, 'call literati_login again'), true);
+  }
+
+  // Pairing-code flow, which needs the project up front.
+  const note = desktopFallbackNote(desktop, serverUrl);
+  if (!projectUrl) {
+    return text(
+      [
+        note,
+        'Ask the user for their Literati project URL (https://literati.ai/projects/<id>, or a bare project id), then call literati_login again with project_url.',
+      ].join('\n'),
+      true,
+    );
+  }
   let res;
   try {
     res = await fetch(`${serverUrl}/cli/pairing/requests`, {
@@ -222,6 +275,7 @@ async function handleLogin(args) {
   savePendingPairing(pendingPairing);
   return text(
     [
+      note,
       'Pairing request sent.',
       'Tell the user to:',
       '  1. Open the project page in the Literati web app (the URL they gave you).',
@@ -242,27 +296,22 @@ async function handleLoginCode(args) {
   // failed, and is TTL-checked the same way.
   const pending = loadPendingPairing() ?? (isPairingFresh(pendingPairing) ? pendingPairing : null);
   if (!pending) {
-    return text('No pairing in progress — call literati_login with the project URL first.', true);
+    return text('No pairing in progress — call literati_login first.', true);
   }
-  let res;
-  try {
-    res = await fetch(
-      `${pending.serverUrl}/cli/pairing/requests/${pending.requestId}/exchange`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...clientHeaders() },
-        body: JSON.stringify({ code }),
-        signal: AbortSignal.timeout(15_000),
-      },
-    );
-  } catch (err) {
-    return text(`Could not reach the Literati server: ${err.message}`, true);
+  // Bind to the directory the pairing was STARTED from, not wherever the code
+  // was pasted — finishing from another directory must not pair that one.
+  const r = await exchangePairingCode({
+    serverUrl: pending.serverUrl,
+    requestId: pending.requestId,
+    code,
+    cwd: pending.cwd ?? process.cwd(),
+    headers: clientHeaders(),
+  });
+  if (r.reason === 'network') return text(r.message, true);
+  if (r.reason === 'invalid_code') {
+    return text('That code is not correct — ask the user to re-check it and try again.', true);
   }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    if (body?.code === 'PAIRING_INVALID_CODE') {
-      return text('That code is not correct — ask the user to re-check it and try again.', true);
-    }
+  if (!r.ok) {
     // Terminal: the request is dead server-side, so drop it. Leaving it would
     // keep serving a doomed request and make "no pairing in progress"
     // permanently unreachable.
@@ -273,23 +322,13 @@ async function handleLoginCode(args) {
       true,
     );
   }
-  const body = await res.json();
-  // Bind to the directory the pairing was STARTED from, not wherever the code
-  // was pasted — finishing from another directory must not pair that one.
-  addProjectCredential(
-    {
-      serverUrl: pending.serverUrl,
-      token: body.token,
-      collectionId: body.collectionId,
-      workspaceId: body.workspaceId,
-      userId: body.userId,
-      projectSlug: body.projectSlug,
-      projectName: body.projectName,
-    },
-    pending.cwd ?? process.cwd(),
-  );
   pendingPairing = null;
   clearPendingPairing();
+  return finishLogin(r.body);
+}
+
+/** Credential is saved: load the project's tools and report success. */
+async function finishLogin(body) {
   remoteTools = await fetchRemoteTools();
   try {
     await server.sendToolListChanged();
@@ -314,7 +353,7 @@ async function handleRemoteTool(name, args) {
   const cred = activeCredential();
   if (!cred) {
     return text(
-      'Not logged in to Literati. Ask the user for their Literati project URL and call literati_login.',
+      'Not logged in to Literati. Call literati_login to pair this directory through the Literati desktop app (no project URL needed up front).',
       true,
     );
   }
@@ -392,9 +431,9 @@ function renderExecuteResult(body) {
   return text(parts.join('\n\n') || '(no output)', body.success === false);
 }
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
+server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const { name, arguments: args } = req.params;
-  if (name === 'literati_login') return handleLogin(args);
+  if (name === 'literati_login') return handleLogin(args, extra?.signal);
   if (name === 'literati_login_code') return handleLoginCode(args);
   return handleRemoteTool(name, args);
 });

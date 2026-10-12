@@ -45,7 +45,8 @@ function run(args, { home, cwd, url }) {
   return new Promise((resolve) => {
     const c = spawn(process.execPath, [LOGIN, ...args], {
       cwd,
-      env: { ...process.env, HOME: home, LITERATI_SERVER_URL: url },
+      // Never probe/launch a real desktop app on the test machine.
+      env: { ...process.env, HOME: home, LITERATI_SERVER_URL: url, LITERATI_DESKTOP_PAIR: '0' },
     });
     let stdout = '', stderr = '';
     c.stdout.on('data', (d) => (stdout += d));
