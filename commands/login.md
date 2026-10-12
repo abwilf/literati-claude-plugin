@@ -35,15 +35,9 @@ reports "no pairing in progress" should you start over as below.
 
 Check pairing: `node "${CLAUDE_PLUGIN_ROOT}/scripts/login.mjs" status`
 
-If not paired, start pairing **right away — do NOT ask for a project URL
-first.** If the Literati desktop app is installed, pairing happens there: the
-user picks the project in a Literati window and clicks Accept, and nothing needs
-pasting. Pass a project URL only if `$ARGUMENTS` already has one (it preselects
-that project).
+If not paired, start pairing **right away — do NOT ask for a project URL first.** Pairing happens in the Literati desktop app: the user picks the project in a Literati window and clicks Accept, and nothing needs pasting. Without the app (not installed, or it can't be started) pairing is refused — there is no code-based alternative for them. Pass a project URL only if `$ARGUMENTS` already has one (it preselects that project).
 
-1. **Before** starting, tell the user: "If you have the Literati desktop app, a
-   window will open — pick the project and click Accept." (The call blocks
-   until they do, so you can't say it afterwards.)
+1. **Before** starting, tell the user: "A Literati window will open — pick the project and click Accept." (The call blocks until they do, so you can't say it afterwards.)
 2. Start pairing:
    - If the `mcp__literati__*` tools are available in this session, call
      `literati_login` (with `project_url` only if you have one).
@@ -53,11 +47,9 @@ that project).
      default Bash timeout.
 3. Read the result:
    - **"Logged in to Literati project …"** → paired; go to section 3.
-   - **Declined / expired / couldn't show the window / not signed in / a request already open** → relay
-     the message as-is. Do not switch to the code flow on your own.
-   - **Asks for a project URL** (no desktop app available) → ask the user for
-     their Literati project URL (looks like `https://literati.ai/projects/<id>`;
-     a bare project id also works) and run step 2 again with it.
+   - **Desktop app isn't installed, couldn't be started, or is too old** → relay the message as-is: it points them at https://literati.ai/download; they install it, open it, sign in, then run `/literati:login` again. Do not ask for a project URL and do not switch to the code flow.
+   - **Declined / expired / didn't show the window / not signed in / a request already open** → relay the message as-is. Do not switch to the code flow on your own.
+   - **Asks for a project URL** (only when the desktop app is connected to a different server, or `LITERATI_DESKTOP_PAIR=0` is set in dev) → ask the user for their Literati project URL (looks like `https://literati.ai/projects/<id>`; a bare project id also works) and run step 2 again with it.
    - **"Pairing request sent."** → the pairing-code flow is in progress; continue below.
 
 Pairing-code flow (only when the result said "Pairing request sent."):

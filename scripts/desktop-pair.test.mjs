@@ -1,15 +1,18 @@
-// Desktop-first pairing: the plugin asks the running Literati desktop app's
-// local connector for a code, falling back to the pairing-code flow when the
-// app can't be used. Fake connector + fake Literati server over real HTTP.
+// Desktop pairing: the plugin asks the running Literati desktop app's local
+// connector for a code, and refuses to pair when there is no usable app (the
+// pairing-code flow is only for an app on another server, or for
+// LITERATI_DESKTOP_PAIR=0). Fake connector + fake Literati server over real
+// HTTP; the MCP-server tests drive the BUILT mcp/bundle.mjs — rebuild first.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { desktopPair, desktopOutcomeMessage } from '../lib/pairing.mjs';
+import { tempHome, session, stubServer, callTool, textOf } from './mcp-test-helpers.mjs';
 
 const LOGIN = fileURLToPath(new URL('./login.mjs', import.meta.url));
 
@@ -78,7 +81,7 @@ const deadPort = async () => {
 
 const base = { serverUrl: 'http://srv', cwd: '/tmp/x', requesterLabel: 'me@host' };
 
-test('unreachable app, launch fails → unavailable (code-flow fallback)', async () => {
+test('unreachable app, launch fails → unavailable, whose message refuses and names the download page', async () => {
   let launches = 0;
   const r = await desktopPair({
     ...base,
@@ -87,6 +90,26 @@ test('unreachable app, launch fails → unavailable (code-flow fallback)', async
   });
   assert.deepEqual(r, { kind: 'unavailable' });
   assert.equal(launches, 1);
+  assert.equal(
+    desktopOutcomeMessage(r, 'retry'),
+    "The Literati desktop app isn't installed, couldn't be started, or is too old for CLI pairing. Pairing needs it: download the latest from https://literati.ai/download, open it and sign in, then retry.",
+  );
+});
+
+test('LITERATI_DESKTOP_PAIR=0 → disabled, without probing or launching (the code-flow escape hatch)', async () => {
+  const prev = process.env.LITERATI_DESKTOP_PAIR;
+  process.env.LITERATI_DESKTOP_PAIR = '0';
+  try {
+    const r = await desktopPair({
+      ...base,
+      connectorUrl: await deadPort(),
+      launch: async () => assert.fail('must not launch the app'),
+    });
+    assert.deepEqual(r, { kind: 'disabled' });
+  } finally {
+    if (prev === undefined) delete process.env.LITERATI_DESKTOP_PAIR;
+    else process.env.LITERATI_DESKTOP_PAIR = prev;
+  }
 });
 
 test('unreachable app that comes up after launch is re-probed and used', async () => {
@@ -202,7 +225,7 @@ test('the app\'s not_shown expiry gets its own message', async () => {
     assert.deepEqual(r, { kind: 'not_shown' });
     assert.equal(
       desktopOutcomeMessage(r, 'retry'),
-      "Literati couldn't show the pairing window — open the Literati app, make sure you're signed in, then try again.",
+      "The Literati desktop app is running but didn't show the pairing window — it may still be starting up, or be signed out. Make sure it's open and signed in, then retry.",
     );
   } finally {
     conn.server.close();
@@ -259,11 +282,11 @@ test('an abort mid long-poll stops polling and withdraws the request', async () 
 
 // --- CLI (scripts/login.mjs), isolated HOME -------------------------------
 
-function run(args, { home, cwd, url, connectorUrl, onSpawn }) {
+function run(args, { home, cwd, url, connectorUrl, onSpawn, desktopPairEnv = '' }) {
   return new Promise((resolve) => {
     const c = spawn(process.execPath, [LOGIN, ...args], {
       cwd,
-      env: { ...process.env, HOME: home, LITERATI_SERVER_URL: url, LITERATI_CONNECTOR_URL: connectorUrl, LITERATI_DESKTOP_PAIR: '' },
+      env: { ...process.env, HOME: home, LITERATI_SERVER_URL: url, LITERATI_CONNECTOR_URL: connectorUrl, LITERATI_DESKTOP_PAIR: desktopPairEnv },
     });
     let stdout = '', stderr = '';
     c.stdout.on('data', (d) => (stdout += d));
@@ -347,17 +370,60 @@ test('CLI: server mismatch → code flow with a note; without a project, asks fo
   }
 });
 
-test('CLI: something else on the connector port (no /cli-pair/hello) → code flow, no launch needed', async () => {
+test('CLI: no usable desktop app (something on the connector port, no /cli-pair/hello) → refuses with the download link; no project-URL prompt, no code flow', async () => {
   const srv = await literati();
-  const old = await fake({}); // e.g. an older app version: 404 everywhere
+  const old = await fake({}); // e.g. an older app version: 404 everywhere — reachable, so nothing is launched
   const { home, cwd } = await cliEnv();
   try {
-    const r = await run(['start', 'abc'], { home, cwd, url: srv.url, connectorUrl: old.url });
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /Pairing request sent/);
+    for (const args of [['start'], ['start', 'abc']]) {
+      const r = await run(args, { home, cwd, url: srv.url, connectorUrl: old.url });
+      assert.equal(r.status, 1, r.stdout);
+      assert.match(r.stderr, /https:\/\/literati\.ai\/download/);
+      assert.doesNotMatch(r.stderr, /project URL/);
+      assert.doesNotMatch(r.stdout, /Pairing request sent/);
+    }
+    assert.equal(srv.seen.length, 0, 'no code flow, no exchange');
+    assert.ok(!existsSync(join(home, '.literati', 'pairing-pending.json')));
   } finally {
     srv.server.close();
     old.server.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('CLI: LITERATI_DESKTOP_PAIR=0 → the code flow, which asks for a project', async () => {
+  const srv = await literati();
+  const { home, cwd } = await cliEnv();
+  try {
+    const noProj = await run(['start'], { home, cwd, url: srv.url, connectorUrl: await deadPort(), desktopPairEnv: '0' });
+    assert.equal(noProj.status, 1);
+    assert.match(noProj.stderr, /LITERATI_DESKTOP_PAIR=0/);
+    assert.match(noProj.stderr, /project URL/);
+    const r = await run(['start', 'abc'], { home, cwd, url: srv.url, connectorUrl: await deadPort(), desktopPairEnv: '0' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /Pairing request sent/);
+    assert.ok(srv.seen.some((s) => s.url === '/cli/pairing/requests'));
+  } finally {
+    srv.server.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('CLI: an approved desktop pairing removes a stale pairing-pending.json', async () => {
+  const srv = await literati();
+  const conn = await connector({ serverUrl: srv.url, polls: [{ status: 'approved', requestId: 'req-9', code: 'DESKCODE' }] });
+  const { home, cwd } = await cliEnv();
+  const pending = join(home, '.literati', 'pairing-pending.json');
+  mkdirSync(join(home, '.literati'));
+  writeFileSync(pending, JSON.stringify({ requestId: 'old', serverUrl: srv.url, cwd, createdAt: new Date().toISOString() }));
+  try {
+    const r = await run(['start'], { home, cwd, url: srv.url, connectorUrl: conn.url });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /Logged in to Literati project "Desk Project"/);
+    assert.ok(!existsSync(pending), 'the stale code-flow marker must be removed');
+  } finally {
+    srv.server.close();
+    conn.server.close();
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -386,4 +452,67 @@ test('CLI: Ctrl-C while waiting in the app withdraws the request and exits 130',
     conn.server.close();
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// --- MCP server (mcp/bundle.mjs), isolated HOME ----------------------------
+
+const mcpLiterati = (t) =>
+  stubServer(t, {
+    'POST /cli/pairing/requests': { requestId: 'code-flow-req' },
+    'POST /cli/pairing/requests/req-9/exchange': { token: 'tok', collectionId: 'coll-1', workspaceId: 'ws', userId: 'u', projectSlug: 'slug', projectName: 'Desk Project' },
+    'GET /mcp-agent/tools': { tools: [], instructions: 'live' },
+  });
+
+test('MCP: no usable desktop app → literati_login refuses with the download link; no project-URL prompt, no code flow', { timeout: 30_000 }, async (t) => {
+  const srv = await mcpLiterati(t);
+  const old = await stubServer(t, {}); // reachable, no /cli-pair/hello → nothing is launched
+  const { results } = await session(
+    tempHome(t),
+    'claude-code',
+    [callTool('literati_login'), callTool('literati_login', { project_url: 'abc' })],
+    { serverUrl: srv.url, env: { LITERATI_DESKTOP_PAIR: '1', LITERATI_CONNECTOR_URL: old.url } },
+  );
+  for (const r of results) {
+    assert.equal(r.isError, true, textOf(r));
+    assert.match(textOf(r), /https:\/\/literati\.ai\/download/);
+    assert.doesNotMatch(textOf(r), /project URL/);
+  }
+  assert.ok(!srv.requests.some((r) => r.url === '/cli/pairing/requests'), 'no code-flow request');
+});
+
+test('MCP: LITERATI_DESKTOP_PAIR=0 → the code flow, which asks for a project', { timeout: 30_000 }, async (t) => {
+  const srv = await mcpLiterati(t);
+  const { results } = await session(
+    tempHome(t),
+    'claude-code',
+    [callTool('literati_login'), callTool('literati_login', { project_url: 'abc' })],
+    { serverUrl: srv.url }, // the harness default is LITERATI_DESKTOP_PAIR=0
+  );
+  assert.equal(results[0].isError, true);
+  assert.match(textOf(results[0]), /LITERATI_DESKTOP_PAIR=0/);
+  assert.match(textOf(results[0]), /project URL/);
+  assert.match(textOf(results[1]), /Pairing request sent/);
+  assert.ok(srv.requests.some((r) => r.url === '/cli/pairing/requests'));
+});
+
+test('MCP: an approved desktop pairing removes a stale pairing-pending.json', { timeout: 30_000 }, async (t) => {
+  const srv = await mcpLiterati(t);
+  const conn = await stubServer(t, {
+    'GET /cli-pair/hello': { app: 'literati', serverUrl: srv.url, signedIn: true },
+    'POST /cli-pair': (_body, res) => {
+      res.statusCode = 202;
+      return { pairId: 'p1' };
+    },
+    'GET /cli-pair/p1': { status: 'approved', requestId: 'req-9', code: 'DESKCODE' },
+  });
+  const home = tempHome(t);
+  const pending = join(home, '.literati', 'pairing-pending.json');
+  mkdirSync(join(home, '.literati'));
+  writeFileSync(pending, JSON.stringify({ requestId: 'old', serverUrl: srv.url, cwd: home, createdAt: new Date().toISOString() }));
+  const { results } = await session(home, 'claude-code', [callTool('literati_login')], {
+    serverUrl: srv.url,
+    env: { LITERATI_DESKTOP_PAIR: '1', LITERATI_CONNECTOR_URL: conn.url },
+  });
+  assert.match(textOf(results[0]), /Logged in to Literati project "Desk Project"/);
+  assert.ok(!existsSync(pending), 'the stale code-flow marker must be removed');
 });

@@ -47,6 +47,8 @@ overview (edit/compile LaTeX, papers, session sync), pointing at
 (`~/.literati/welcomed` marker); later unpaired sessions just offer login
 when relevant.
 
+This pass exercises the pairing-code flow, which only runs when the desktop app is connected to a different server than the plugin (as here: app on production, plugin on localhost) or with `LITERATI_DESKTOP_PAIR=0`; without any desktop app `/literati:login` refuses and points at https://literati.ai/download.
+
 Run `/literati:login` (or paste your project URL,
 `http://localhost:3010/project/<id>`):
 1. **Expect:** Claude registers the MCP server via Bash (you approve the

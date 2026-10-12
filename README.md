@@ -5,17 +5,15 @@ the project's server-side documents.
 
 ## Installation
 
-**1.** Install: replace `your_project_id` below from your Literati project URL
+Pairing goes through the [Literati desktop app](https://literati.ai/download): have it installed and signed in, then from your project folder:
 
 ```bash
-claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati && claude -p "/literati:login https://literati.ai/projects/your_project_id" --allowedTools "Bash"
+claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati
 ```
 
-**2.** Approve the pairing request on your project page, then run this with the one-time code it shows you:
+Then open Claude Code in your project folder and type `/literati:login`. Approve the two commands it runs; the Literati desktop app opens a project picker — pick the project and click Accept.
 
-```bash
-claude "/literati:login YOUR_CODE_HERE"
-```
+A Literati window opens — pick the project and click Accept. No project id needed; the folder (and its subfolders) is paired with that project. In Codex, install the same plugin (`codex plugin marketplace add abwilf/literati-claude-plugin && codex plugin add literati@literati`) and ask it to call `literati_login` from the project folder.
 
 ## Un-installation
 
