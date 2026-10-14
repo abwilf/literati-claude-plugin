@@ -18,10 +18,9 @@ import { ROOT, tempHome, session, stubServer, callTool, textOf } from './mcp-tes
 const execFileAsync = promisify(execFile);
 const LIVE = [{ name: 'list_papers', description: 'List papers', inputSchema: { type: 'object', properties: {} } }];
 
-/** A stand-in server that completes the whole pairing flow. */
+/** A stand-in server that completes the pairing (the exchange) and serves tools. */
 function pairingServer(t) {
   return stubServer(t, {
-    'POST /cli/pairing/requests': { requestId: 'r1', expiresAt: new Date(Date.now() + 600_000).toISOString() },
     'POST /cli/pairing/requests/r1/exchange': {
       token: 't2',
       collectionId: 'c2',
@@ -35,19 +34,27 @@ function pairingServer(t) {
   });
 }
 
-/** Unpaired → login → code → one tool call, as `clientName`. */
+/** A stand-in desktop-app connector that approves the first request at once. */
+function connectorStub(t, serverUrl) {
+  return stubServer(t, {
+    'GET /cli-pair/hello': { app: 'literati', serverUrl, signedIn: true },
+    'POST /cli-pair': (_body, res) => {
+      res.statusCode = 202;
+      return { pairId: 'p1' };
+    },
+    'GET /cli-pair/p1': { status: 'approved', requestId: 'r1', code: 'CODE1234' },
+  });
+}
+
+/** Unpaired → login through the desktop app → one tool call, as `clientName`. */
 async function pairAndCall(t, clientName) {
   const server = await pairingServer(t);
+  const conn = await connectorStub(t, server.url);
   const out = await session(
     tempHome(t),
     clientName,
-    [
-      ['tools/list', {}],
-      callTool('literati_login', { project_url: 'http://localhost:3010/project/abc' }),
-      callTool('literati_login_code', { code: 'CODE1234' }),
-      callTool('list_papers'),
-    ],
-    { serverUrl: server.url },
+    [['tools/list', {}], callTool('literati_login'), callTool('list_papers')],
+    { serverUrl: server.url, env: { LITERATI_CONNECTOR_URL: conn.url } },
   );
   return { ...out, requests: server.requests };
 }
@@ -61,9 +68,9 @@ for (const [clientName, expected] of [
 ]) {
   test(`${clientName}: every Literati request says X-Literati-Client=${expected}`, { timeout: 30_000 }, async (t) => {
     const { results, requests } = await pairAndCall(t, clientName);
-    assert.equal(results[3].isError, false, textOf(results[3]));
+    assert.equal(results[2].isError, false, textOf(results[2]));
     const seen = new Set(requests.map((r) => `${r.method} ${r.url}`));
-    for (const route of ['POST /cli/pairing/requests', 'POST /cli/pairing/requests/r1/exchange', 'GET /mcp-agent/tools', 'POST /mcp-agent/tools/execute']) {
+    for (const route of ['POST /cli/pairing/requests/r1/exchange', 'GET /mcp-agent/tools', 'POST /mcp-agent/tools/execute']) {
       assert.ok(seen.has(route), `${route} was not called`);
     }
     for (const req of requests) assert.equal(header(req), expected, `${req.method} ${req.url}`);
@@ -77,7 +84,6 @@ test('nothing the model sees names Claude Code', { timeout: 30_000 }, async (t) 
       init.instructions,
       ...results[0].tools.map((tool) => tool.description),
       textOf(results[1]),
-      textOf(results[2]),
     ].join('\n');
     assert.doesNotMatch(shown, /Claude Code/, clientName);
   }
@@ -89,11 +95,12 @@ test('a project URL means literati_login, not fetching it — opening it for the
   for (const text of [login.description, init.instructions]) {
     assert.match(text, /project URL/);
     assert.match(text, /fetch(ing)? or curl/i);
-    // /literati:login tells Claude to open the project page for the user.
+    // Opening the project URL in the user's browser is harmless; only fetching
+    // it to "connect" is wrong, so the wording must not forbid opening.
     assert.match(text, /opening it in the user's browser for them is fine/);
     assert.doesNotMatch(text, /do not open/i);
   }
-  // Unpaired Claude Code has only the login tools, so a missing tool must
+  // Unpaired Claude Code has only the login tool, so a missing tool must
   // still lead to pairing.
   assert.match(init.instructions, /If Literati tools are missing/);
 });
@@ -125,36 +132,32 @@ test('paired folder: tool calls and approval waits are labelled; the pre-handsha
 
 test('after login, Codex is told the tools are ready to call', { timeout: 30_000 }, async (t) => {
   const { results } = await pairAndCall(t, 'codex-mcp-client');
-  assert.match(textOf(results[2]), /Logged in to Literati project "Proj2"/);
-  assert.match(textOf(results[2]), /ready.*call them directly/i);
-  assert.doesNotMatch(textOf(results[2]), /restart|reconnect/i);
+  assert.match(textOf(results[1]), /Logged in to Literati project "Proj2"/);
+  assert.match(textOf(results[1]), /ready.*call them directly/i);
+  assert.doesNotMatch(textOf(results[1]), /restart|reconnect/i);
 });
 
 test('login.mjs (Claude Code /literati:login) says claude-code and stays client-neutral', { timeout: 30_000 }, async (t) => {
   const server = await pairingServer(t);
+  const conn = await connectorStub(t, server.url);
   const home = tempHome(t);
   // Async: the stub server runs in this process, so a sync spawn would block it.
-  const run = (...args) =>
-    execFileAsync(process.execPath, [join(ROOT, 'scripts', 'login.mjs'), ...args], {
-      cwd: home,
-      env: { ...process.env, HOME: home, LITERATI_SERVER_URL: server.url, LITERATI_DESKTOP_PAIR: '0' },
-      timeout: 15_000,
-    });
-  const started = await run('start', 'http://localhost:3010/project/abc');
+  const started = await execFileAsync(process.execPath, [join(ROOT, 'scripts', 'login.mjs'), 'start'], {
+    cwd: home,
+    env: { ...process.env, HOME: home, LITERATI_SERVER_URL: server.url, LITERATI_CONNECTOR_URL: conn.url },
+    timeout: 15_000,
+  });
   assert.doesNotMatch(started.stdout, /Claude Code/);
-  await run('code', 'CODE1234');
+  assert.match(started.stdout, /Logged in to Literati project "Proj2"/);
   assert.deepEqual(
     server.requests.map((r) => [r.url, header(r)]),
-    [
-      ['/cli/pairing/requests', 'claude-code'],
-      ['/cli/pairing/requests/r1/exchange', 'claude-code'],
-    ],
+    [['/cli/pairing/requests/r1/exchange', 'claude-code']],
   );
 });
 
 test('after login, Claude Code still gets the tool count', { timeout: 30_000 }, async (t) => {
   const { results } = await pairAndCall(t, 'claude-code');
-  assert.match(textOf(results[2]), /Logged in to Literati project "Proj2"\. 1 Literati tools are now available\./);
+  assert.match(textOf(results[1]), /Logged in to Literati project "Proj2"\. 1 Literati tools are now available\./);
 });
 
 // Desktop pairing: the app's connector learns which client is asking (for its
@@ -167,17 +170,10 @@ for (const [clientName, expected] of [
 ]) {
   test(`${clientName}: desktop pairing sends client=${expected} to the connector`, { timeout: 30_000 }, async (t) => {
     const server = await pairingServer(t);
-    const conn = await stubServer(t, {
-      'GET /cli-pair/hello': { app: 'literati', serverUrl: server.url, signedIn: true },
-      'POST /cli-pair': (_body, res) => {
-        res.statusCode = 202;
-        return { pairId: 'p1' };
-      },
-      'GET /cli-pair/p1': { status: 'approved', requestId: 'r1', code: 'CODE1234' },
-    });
+    const conn = await connectorStub(t, server.url);
     const { results } = await session(tempHome(t), clientName, [callTool('literati_login')], {
       serverUrl: server.url,
-      env: { LITERATI_DESKTOP_PAIR: '1', LITERATI_CONNECTOR_URL: conn.url },
+      env: { LITERATI_CONNECTOR_URL: conn.url },
     });
     assert.match(textOf(results[0]), /Logged in to Literati project "Proj2"/);
     const post = conn.requests.find((r) => r.method === 'POST' && r.url === '/cli-pair');

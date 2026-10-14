@@ -2,8 +2,8 @@
 //   - Codex lists tools once and ignores tools/list_changed → when the remote
 //     list is unavailable (unpaired, or server down) it must get the full
 //     catalog up front, or a mid-session login leaves it with only the login
-//     tools until a restart.
-//   - Claude Code refreshes on list_changed → it keeps the two login tools.
+//     tool until a restart.
+//   - Claude Code refreshes on list_changed → it keeps just the login tool.
 //   - Paired with the server up, both get the live list.
 // Rebuild first after editing mcp/index.mjs: `(cd mcp && npm run build)`.
 // Run: `node --test scripts/`
@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { ROOT, DEAD_SERVER, tempHome, session, stubServer, toolNames, callTool } from './mcp-test-helpers.mjs';
 
 const CATALOG = JSON.parse(readFileSync(join(ROOT, 'mcp', 'tool-catalog.json'), 'utf8'));
-const LOGIN_TOOLS = ['literati_login', 'literati_login_code'];
+const LOGIN_TOOLS = ['literati_login'];
 const CATALOG_NAMES = CATALOG.tools.map((t) => t.name);
 
 test('the catalog snapshot is well-formed', () => {
@@ -30,12 +30,12 @@ test('the catalog snapshot is well-formed', () => {
   }
 });
 
-test('unpaired: Codex sees the login tools plus the full catalog', { timeout: 30_000 }, async (t) => {
+test('unpaired: Codex sees the login tool plus the full catalog', { timeout: 30_000 }, async (t) => {
   const { results: [list] } = await session(tempHome(t), 'codex-mcp-client', [['tools/list', {}]]);
   assert.deepEqual(toolNames(list), [...LOGIN_TOOLS, ...CATALOG_NAMES]);
 });
 
-test('unpaired: Claude Code sees only the login tools', { timeout: 30_000 }, async (t) => {
+test('unpaired: Claude Code sees only the login tool', { timeout: 30_000 }, async (t) => {
   const { results: [list] } = await session(tempHome(t), 'claude-code', [['tools/list', {}]]);
   assert.deepEqual(toolNames(list), LOGIN_TOOLS);
 });
@@ -46,7 +46,7 @@ test('unpaired: a catalog tool says how to log in', { timeout: 30_000 }, async (
   assert.match(res.content[0].text, /Not logged in to Literati.*literati_login/);
 });
 
-test('paired, server down: Codex keeps the catalog, Claude Code the login tools', { timeout: 30_000 }, async (t) => {
+test('paired, server down: Codex keeps the catalog, Claude Code the login tool', { timeout: 30_000 }, async (t) => {
   const { results: [codexList, codexCall] } = await session(tempHome(t, DEAD_SERVER), 'codex-mcp-client', [
     ['tools/list', {}],
     callTool(CATALOG_NAMES[0]),
