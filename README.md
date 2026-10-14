@@ -11,9 +11,7 @@ Pairing goes through the [Literati desktop app](https://literati.ai/download): h
 claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin install literati@literati
 ```
 
-Then open Claude Code in your project folder and type `/literati:login`. Approve the two commands it runs; the Literati desktop app opens a project picker — pick the project and click Accept.
-
-A Literati window opens — pick the project and click Accept. No project id needed; the folder (and its subfolders) is paired with that project. In Codex, install the same plugin (`codex plugin marketplace add abwilf/literati-claude-plugin && codex plugin add literati@literati`) and ask it to call `literati_login` from the project folder.
+Then open Claude Code in your project folder and type `/literati:login`. Approve the commands it runs; the Literati desktop app opens a project picker — pick the project and click Accept. No project id needed; the folder (and its subfolders) is paired with that project. In Codex, install the same plugin (`codex plugin marketplace add abwilf/literati-claude-plugin && codex plugin add literati@literati`) and ask it to call `literati_login` from the project folder.
 
 ## Un-installation
 

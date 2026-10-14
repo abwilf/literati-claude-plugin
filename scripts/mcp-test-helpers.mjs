@@ -40,12 +40,16 @@ export function tempHome(t, serverUrl) {
  * Returns `{ init, results }` — the initialize result and each request's result.
  */
 export async function session(home, clientName, requests, { serverUrl = DEAD_SERVER, env = {} } = {}) {
+  if (!env.LITERATI_CONNECTOR_URL && requests.some(([m, p]) => m === 'tools/call' && p?.name === 'literati_login')) {
+    throw new Error('literati_login needs env.LITERATI_CONNECTOR_URL (a stub), or the test launches the real desktop app');
+  }
   const child = spawn(process.execPath, [BUNDLE], {
     cwd: home,
     // Unpaired calls resolve against this; nothing here may reach a real server
-    // — nor a real desktop app (pass `env` with a LITERATI_CONNECTOR_URL to
-    // test desktop pairing against a stub).
-    env: { ...process.env, HOME: home, LITERATI_SERVER_URL: serverUrl, LITERATI_DESKTOP_PAIR: '0', ...env },
+    // — nor a real desktop app: every literati_login call must pass `env` with
+    // a LITERATI_CONNECTOR_URL pointing at a stub, or the server probes the
+    // real connector port and launches the real app via literati://cli-pair.
+    env: { ...process.env, HOME: home, LITERATI_SERVER_URL: serverUrl, ...env },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   const exited = once(child, 'exit').then(([code]) => {
@@ -115,7 +119,6 @@ export async function stubServer(t, routes) {
       res.statusCode = 404;
       return res.end('{}');
     }
-    if (req.method === 'POST' && req.url === '/cli/pairing/requests') res.statusCode = 201;
     res.end(JSON.stringify(typeof route === 'function' ? route(body, res) : route));
   });
   srv.listen(0, '127.0.0.1');

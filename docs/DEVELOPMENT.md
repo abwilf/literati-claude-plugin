@@ -59,13 +59,9 @@ Run `/literati:login`.
 
 Pairing goes through the Literati desktop app (signed in, against the same server as the plugin): a Literati window opens (launched via `literati://cli-pair` if it isn't running); pick the project and click Accept. Nothing to paste — the plugin gets the code from the app's local connector (`127.0.0.1:21279`, override with `LITERATI_CONNECTOR_URL`).
 
-**No desktop app** (not installed, or it couldn't be started within ~30s): pairing is refused and the message points at https://literati.ai/download. There is no code-based alternative for users.
+**No desktop app** (not installed, or it couldn't be started within ~30s): pairing is refused and the message points at https://literati.ai/download. There is no other way to pair.
 
-**Pairing-code flow** — only when the app is connected to a different server than the plugin (typical in dev: the app on production, the plugin on `LITERATI_SERVER_URL=http://localhost:3000`), or when `LITERATI_DESKTOP_PAIR=0` is set (development escape hatch: skips the app entirely, never probes or launches it). It needs your project URL — it looks like `https://literati.ai/projects/<id>`, or `http://localhost:3010/project/<id>` in dev; a bare project id also works:
-
-1. Give Claude your project URL.
-2. Open that project in the Literati web app; approve the "Claude Code pairing request" prompt.
-3. Paste the one-time code back into Claude Code.
+**Different server** (typical in dev: the app on production, the plugin on `LITERATI_SERVER_URL=http://localhost:3000`): pairing fails with a message naming both URLs. Point the app at the same server as the plugin (a dev build of the app for a local server), or the plugin at the app's server via `LITERATI_SERVER_URL`, and pair again.
 
 The pairing token is stored in `~/.literati/credentials.json` (chmod 600),
 scoped to that one project and bound to the directory you paired from (and its
@@ -91,6 +87,8 @@ claude plugin update literati@literati
 The version bump matters twice: it ships the new plugin AND triggers the
 SessionStart hook to refresh the stable bundle copy at
 `~/.literati/mcp/bundle.mjs` (compared via `~/.literati/mcp/manifest.json`).
+
+After the new version is pushed to the marketplace (never before, or every install is told to run an update that does nothing), bump `LATEST_PLUGIN_VERSION` in the Literati server (`server/src/services/mcp-agent/context.ts`) to the same version: `GET /mcp-agent/context` reports it as `pluginVersion`, and the SessionStart hook tells older installs to update when that is newer than the version they run.
 
 When the server's tool list changes (`GET /mcp-agent/tools`), regenerate the
 catalog Codex sees before a folder is paired, then rebuild. Run it from a

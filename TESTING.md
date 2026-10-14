@@ -18,7 +18,7 @@ rm -rf ~/.literati/sessions ~/.literati/mcp
 ```
 
 Hard-refresh the browser tab on your project page (new renderer code:
-pairing modal, bib-approval modal, compile bridge).
+bib-approval modal, compile bridge).
 
 ## 1. Install (the real distribution path)
 
@@ -47,23 +47,15 @@ overview (edit/compile LaTeX, papers, session sync), pointing at
 (`~/.literati/welcomed` marker); later unpaired sessions just offer login
 when relevant.
 
-This pass exercises the pairing-code flow, which only runs when the desktop app is connected to a different server than the plugin (as here: app on production, plugin on localhost) or with `LITERATI_DESKTOP_PAIR=0`; without any desktop app `/literati:login` refuses and points at https://literati.ai/download.
+Pairing goes only through the Literati desktop app, so have it running and signed in against the SAME server as the plugin — for this dev pass, a dev build of the app pointed at `http://localhost:3000`. (An app on production while the plugin is on localhost fails with a server-mismatch message; no app at all refuses with the download link — both are checked in step 6.)
 
-Run `/literati:login` (or paste your project URL,
-`http://localhost:3010/project/<id>`):
-1. **Expect:** Claude registers the MCP server via Bash (you approve the
-   `claude mcp add --scope user literati -- node ~/.literati/mcp/bundle.mjs`
-   command; for dev it should include `-e LITERATI_SERVER_URL=…` after
-   `literati`), then
-   starts pairing via `scripts/login.mjs`.
-2. **Expect:** a "Claude Code pairing request" modal pops on the project page
-   in the browser within ~1s. Approve → 8-char code appears.
-3. Paste the code into Claude Code → "Logged in to <project>", and Claude
-   tells you to restart Claude Code to load the tools.
-4. Restart. **Expect:** `/mcp` shows a server named `literati` (NO
-   `plugin:` prefix); ~19 tools namespaced `mcp__literati__*`; a tool call
-   renders as `literati - list_files (MCP)`. Also try Deny on a second login
-   to see the denial path.
+Run `/literati:login` (or paste your project URL, `http://localhost:3010/project/<id>` — it preselects that project in the picker):
+1. **Expect:** Claude registers the MCP server via Bash (you approve the `claude mcp add --scope user literati -- node ~/.literati/mcp/bundle.mjs` command; for dev it should include `-e LITERATI_SERVER_URL=…` after `literati`), says "A Literati window will open — pick the project and click Accept", then starts pairing via `scripts/login.mjs`.
+2. **Expect:** the Literati app comes to the front with its pairing window within ~1s (launched via `literati://cli-pair` if it wasn't running). Pick the project and click Accept — nothing to paste, and Claude never asks for a project URL.
+3. **Expect:** "Logged in to <project>", and Claude tells you to restart Claude Code to load the tools.
+4. Restart. **Expect:** `/mcp` shows a server named `literati` (NO `plugin:` prefix); ~19 tools namespaced `mcp__literati__*`; a tool call renders as `literati - list_files (MCP)`.
+5. Re-pair: run `/literati:login` again in the same folder. **Expect:** Claude names the current project, does NOT answer "already paired", and calls `literati_login`; the Literati window opens again; after Accept the tools are available right away, **without a restart** (pick a different project to see the folder switch).
+6. The other outcomes, each on a fresh `/literati:login`: click **Decline** → "declined" message, nothing paired, no fallback offered; leave the window alone for ~3 minutes → "expired" message; quit the app and make it unlaunchable (move `Literati.app` to the Trash and confirm `open literati://cli-pair` fails first; a renamed bundle is often still found by LaunchServices) → refusal pointing at https://literati.ai/download, no project-URL question (an app that is merely closed gets launched instead); app signed in to production while the plugin is on localhost → server-mismatch message naming both URLs.
 
 **Per-directory scoping:** `cd` to a different directory, run `claude`, ask
 about the project — **expect** logged-out + login offer (credentials bind to
@@ -170,11 +162,9 @@ LITERATI_SERVER_URL=http://localhost:3000 codex --no-daemon
 - `/hooks` → trust the Literati SessionStart hook (it only maintains a fallback
   copy of the bundle; the server runs the installed one from Codex's plugin
   cache).
-- `/mcp` → `literati: connected (21 tools)` even before pairing, in the very
+- `/mcp` → `literati: connected (20 tools)` even before pairing, in the very
   first session after install.
-- "connect to <project URL>" (no tool name) →
-  approve in the web app → paste the code → **without restarting**, "list the
-  papers in this Literati project" works.
+- "connect to <project URL>" (no tool name) → the Literati window opens with that project preselected → Accept → **without restarting**, "list the papers in this Literati project" works.
 - A second folder paired to another project only sees its own project.
 - Read 10 lines of `main.tex`, then `write` → refused; `edit` + `compile` work.
 - Claude Code in the same folder: one `literati` server, same pairing.
@@ -185,7 +175,6 @@ LITERATI_SERVER_URL=http://localhost:3000 codex --no-daemon
 
 | Symptom | Check |
 |---|---|
-| No pairing modal | Browser tab must be OPEN on that project's page (prompt rides the project WebSocket); hard-refresh after server restarts |
 | No welcome | `rm ~/.literati/welcomed` and start a new session |
 | Tools missing | `/mcp` — is `literati` connected? `claude mcp get literati` registered and pointing at `~/.literati/mcp/bundle.mjs`? Registered with `-e LITERATI_SERVER_URL` for dev? |
 | No /resume entry | `ls ~/.literati/sessions/` — no marker means no Literati tool ran (PostToolUse matcher) |

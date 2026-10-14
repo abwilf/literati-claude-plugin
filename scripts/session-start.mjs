@@ -47,6 +47,20 @@ function pluginVersion() {
   }
 }
 
+/** Is `latest` a strictly newer major.minor.patch than `installed`? Compared
+ * as numeric tuples (0.10.0 > 0.7.2). Anything malformed on either side is
+ * "not newer", so a bad server value never nags. */
+function isNewerVersion(latest, installed) {
+  const parse = (v) => (typeof v === 'string' && /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null);
+  const a = parse(latest);
+  const b = parse(installed);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return false;
+}
+
 function sha256(path) {
   try {
     return createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -175,7 +189,7 @@ async function main() {
       [
         'The Literati plugin is installed but this directory is not yet paired with a Literati project, so Literati tools will not work.',
         registered
-          ? 'When the user first asks for anything Literati-related (or at the start of the conversation if they seem to be here for Literati), offer to log them in, then run the /literati:login flow (do not ask for a project URL first — with the Literati desktop app they pick the project there; the flow asks for a URL only if needed).'
+          ? 'When the user first asks for anything Literati-related (or at the start of the conversation if they seem to be here for Literati), offer to log them in, then run the /literati:login flow (do not ask for a project URL first — with the Literati desktop app they pick the project there).'
           : 'The `literati` MCP server is also not registered yet. When the user wants Literati, run the /literati:login flow — it registers the server and pairs this directory.',
       ].join('\n'),
     );
@@ -200,6 +214,7 @@ async function main() {
   const ctx = await fetchProjectContext(cred);
   const lines = [
     `This directory is paired with the Literati project "${ctx?.projectName ?? cred.projectName}". The Literati MCP tools (read, edit, compile, grep, papers, …) operate on that project's server-side files — not on local files.`,
+    'If the user asks to pair, re-pair, log in again, or switch this folder to another project, run /literati:login (or call literati_login): a new pairing replaces this one. Do not answer that it is already paired.',
   ];
   if (ctx) {
     if (typeof ctx.paperCount === 'number') {
@@ -208,6 +223,14 @@ async function main() {
     if (Array.isArray(ctx.files) && ctx.files.length > 0) {
       lines.push(
         `Project files (as of session start — use list_files or grep if this looks stale): ${ctx.files.join(', ')}`,
+      );
+    }
+    // Stale-plugin nudge: the server reports the latest published plugin
+    // version; the plugin can't update itself, so the model asks the user to.
+    const installed = pluginVersion();
+    if (isNewerVersion(ctx.pluginVersion, installed)) {
+      lines.push(
+        `A newer Literati plugin (${ctx.pluginVersion}) is available; this session runs ${installed}. At the start of your first reply, tell the user once: update with \`claude plugin update literati@literati\` and restart Claude Code. Then carry on with their request.`,
       );
     }
   }
