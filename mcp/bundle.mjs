@@ -16043,13 +16043,31 @@ var CONNECTOR_URL = process.env.LITERATI_CONNECTOR_URL || "http://127.0.0.1:2127
 var CONNECTOR_HEADERS = { "X-Literati-Connector": "1" };
 var DEEP_LINK = "literati://cli-pair";
 var normalizeServerUrl = (u) => String(u ?? "").replace(/\/+$/, "");
+var CODE_RE = /^[A-HJ-NP-Z2-9]{8}$/;
+var normalizeCode = (code) => String(code ?? "").trim().toUpperCase();
+function isPairingCode(input) {
+  return CODE_RE.test(normalizeCode(input));
+}
+async function fetchPairPageUrl(serverUrl) {
+  try {
+    const res = await fetch(`${serverUrl}/config/public`, { signal: AbortSignal.timeout(5e3) });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const webAppUrl = normalizeServerUrl(body?.webAppUrl);
+    return webAppUrl ? `${webAppUrl}/pair` : null;
+  } catch {
+    return null;
+  }
+}
 async function exchangePairingCode({ serverUrl, requestId, code, cwd, headers = {} }) {
+  const byCode = !requestId;
+  const path = byCode ? "/cli/pairing/exchange" : `/cli/pairing/requests/${requestId}/exchange`;
   let res;
   try {
-    res = await fetch(`${serverUrl}/cli/pairing/requests/${requestId}/exchange`, {
+    res = await fetch(`${serverUrl}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code: byCode ? normalizeCode(code) : code }),
       signal: AbortSignal.timeout(15e3)
     });
   } catch (err) {
@@ -16058,7 +16076,11 @@ async function exchangePairingCode({ serverUrl, requestId, code, cwd, headers = 
   if (!res.ok) {
     const body2 = await res.json().catch(() => ({}));
     if (body2?.code === "PAIRING_INVALID_CODE") {
-      return { ok: false, reason: "invalid_code", message: "That code is not correct." };
+      return {
+        ok: false,
+        reason: "invalid_code",
+        message: byCode ? "That code is not correct, or it expired or was already used (codes last 10 minutes and work once)." : "That code is not correct."
+      };
     }
     if (body2?.code === "CLI_TOKEN_LIMIT") {
       return {
@@ -16067,10 +16089,20 @@ async function exchangePairingCode({ serverUrl, requestId, code, cwd, headers = 
         message: "This account has too many CLI tokens. Revoke an old one in the Literati app (Settings \u2192 CLI & agent tokens), then pair again."
       };
     }
+    if (body2?.code === "PAIRING_CODE_AMBIGUOUS") {
+      return { ok: false, reason: "terminal", message: "That code is not unique \u2014 create a new code on the pairing page." };
+    }
+    if (byCode && body2?.code === "PAIRING_NOT_EXCHANGEABLE") {
+      return { ok: false, reason: "terminal", message: "That code was already used or cancelled. Create a new code." };
+    }
+    if (res.status === 429 && body2?.code === "RATE_LIMITED") {
+      const wait = typeof body2.retryAfterSeconds === "number" ? `${body2.retryAfterSeconds} seconds` : "a few minutes";
+      return { ok: false, reason: "rate_limited", message: `Too many pairing attempts right now. Try again in ${wait}.` };
+    }
     return {
       ok: false,
       reason: "terminal",
-      message: "Pairing could not be completed (expired, denied, or too many attempts)."
+      message: byCode ? "Pairing could not be completed. Create a new code." : "Pairing could not be completed (expired, denied, or too many attempts)."
     };
   }
   const body = await res.json();
@@ -16260,12 +16292,17 @@ async function desktopPair({
   await cancelPair(connectorUrl, pairId, client);
   return { kind: "timeout" };
 }
-function desktopOutcomeMessage(outcome, retry) {
+function pairByCodeHint({ pairUrl, paste }) {
+  const page = pairUrl ? `open ${pairUrl}` : "open the Literati web app's pairing page (/pair)";
+  return `Or pair without the app: ${page} in a browser where the user is signed in to Literati, pick the project, and ${paste}.`;
+}
+function desktopOutcomeMessage(outcome, retry, byCode) {
+  const alt = byCode ? ` ${pairByCodeHint(byCode)}` : "";
   switch (outcome.kind) {
     case "unavailable":
-      return `The Literati desktop app isn't installed, couldn't be started, or is too old for CLI pairing. Pairing needs it: download the latest from https://literati.ai/download, open it and sign in, then ${retry}.`;
+      return `The Literati desktop app isn't installed, couldn't be started, or is too old for CLI pairing. Download the latest from https://literati.ai/download, open it and sign in, then ${retry}.${alt}`;
     case "server_mismatch":
-      return `The Literati desktop app is connected to ${outcome.appServerUrl}, but this plugin talks to ${outcome.serverUrl}. Point both at the same server (the plugin reads LITERATI_SERVER_URL when it starts), then ${retry}.`;
+      return `The Literati desktop app is connected to ${outcome.appServerUrl}, but this plugin talks to ${outcome.serverUrl}. Point both at the same server (the plugin reads LITERATI_SERVER_URL when it starts), then ${retry}.${alt}`;
     case "signed_out":
       return `The Literati desktop app is open but not signed in. Ask the user to sign in there, then ${retry}.`;
     case "busy":
@@ -16291,13 +16328,17 @@ var DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || "https://api.literat
 var EXECUTE_TIMEOUT_MS = 9 * 6e4;
 var LOGIN_TOOL = {
   name: "literati_login",
-  description: `Pair this folder with a Literati project. Call this whenever the user asks to connect or log in to Literati, or gives a Literati project URL (\u2026/project/<id>) \u2014 pair with this tool rather than fetching or curling the URL to connect (opening it in the user's browser for them is fine). Also call it when the user asks to pair, re-pair, log in again, or switch the project of a folder that is already paired \u2014 a new pairing replaces the old one, so never answer that it is already paired. Pairing goes through the Literati desktop app: it opens a project picker there (starting the app if needed); if the app isn't installed the call fails and tells the user where to download it \u2014 relay that, there is no other way to pair. Do not ask for a project URL up front \u2014 call this with none unless the user already gave one. BEFORE calling, tell the user: "A Literati window will open \u2014 pick the project and click Accept." The call waits (up to ~3 minutes) for them to accept in the app. If it fails (app not installed or signed out, the user declined, the request expired, or the app is connected to a different server than this plugin), relay the message as-is \u2014 it says what to fix \u2014 and never ask for a project URL to get around it.`,
+  description: "Pair this folder with a Literati project. Call this whenever the user asks to connect or log in to Literati, or gives a Literati project URL (\u2026/project/<id>) \u2014 pair with this tool rather than fetching or curling the URL to connect (opening it in the user's browser for them is fine). Also call it when the user asks to pair, re-pair, log in again, or switch the project of a folder that is already paired \u2014 a new pairing replaces the old one, so never answer that it is already paired. Pairing goes through the Literati desktop app: it opens a project picker there (starting the app if needed). If the app isn't installed the call fails with two ways forward \u2014 install it, or pair without it: the user opens the Literati web pairing page the message names (signed in there), picks the project and gets an 8-character code; ask them for that code and call this tool again with it as `code`. Do not ask for a project URL up front \u2014 call this with none unless the user already gave one. BEFORE calling without a code, tell the user: \"A Literati window will open \u2014 pick the project and click Accept.\" The call waits (up to ~3 minutes) for them to accept in the app. If it fails (app not installed or signed out, the user declined, the request expired, or the app is connected to a different server than this plugin), relay the message as-is \u2014 it says what to fix \u2014 and never ask for a project URL to get around it.",
   inputSchema: {
     type: "object",
     properties: {
       project_url: {
         type: "string",
         description: "Optional. The Literati project URL (\u2026/project/<id>) or bare project id/slug. Preselects the project in the desktop app."
+      },
+      code: {
+        type: "string",
+        description: "Optional. An 8-character pairing code the user created on Literati's web pairing page (for a machine without the desktop app). When given, the code is exchanged directly and the desktop app is not used."
       }
     },
     additionalProperties: false
@@ -16306,7 +16347,7 @@ var LOGIN_TOOL = {
 var remoteTools = null;
 var FALLBACK_INSTRUCTIONS = [
   "Literati manages LaTeX research projects with server-side files and a paper library.",
-  `When the user gives a Literati project URL or asks to connect Literati, pair by calling literati_login (with the URL if given) \u2014 don't fetch or curl the URL to connect (opening it in the user's browser for them is fine). If Literati tools are missing or a Literati tool fails with "Not logged in", pair the same way (no project URL needed up front \u2014 pairing goes through the Literati desktop app).`,
+  `When the user gives a Literati project URL or asks to connect Literati, pair by calling literati_login (with the URL if given) \u2014 don't fetch or curl the URL to connect (opening it in the user's browser for them is fine). If Literati tools are missing or a Literati tool fails with "Not logged in", pair the same way (no project URL needed up front \u2014 pairing goes through the Literati desktop app, or a code from the web pairing page when there is no app).`,
   "NEVER hand-edit .bib bibliography files \u2014 add references with the add_paper tool (hand-written BibTeX risks hallucinated citations); .bib edits require explicit in-app user approval.",
   "After editing .tex/.bib/.sty files, run the compile tool and fix errors before finishing.",
   "Only use stage_changes / commit_changes when the user explicitly asks."
@@ -16381,10 +16422,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   }
   return { tools };
 });
+var PASTE = "call literati_login again with it as `code`";
+var pairPageOr = async (serverUrl) => await fetchPairPageUrl(serverUrl) ?? "the Literati web app's pairing page (/pair)";
 async function handleLogin(args, signal) {
   const projectUrl = String(args?.project_url ?? "").trim();
+  const code = String(args?.code ?? (isPairingCode(projectUrl) ? projectUrl : "")).trim();
   const serverUrl = DEFAULT_SERVER_URL;
   const requesterLabel = `${os.userInfo().username}@${os.hostname()}`;
+  if (code) {
+    if (!isPairingCode(code)) {
+      return text(
+        `That doesn't look like a Literati pairing code (8 letters and digits, e.g. K7QM2XPT). Ask the user to copy it from the pairing page, then ${PASTE}.`,
+        true
+      );
+    }
+    const r = await exchangePairingCode({ serverUrl, code, cwd: process.cwd(), headers: clientHeaders() });
+    if (!r.ok) {
+      const next = r.reason === "network" || r.reason === "rate_limited" ? `Then ${PASTE} \u2014 the same code.` : `Ask the user to create a new code at ${await pairPageOr(serverUrl)}, then ${PASTE}.`;
+      return text(`${r.message} ${next}`, true);
+    }
+    return finishLogin(r.body);
+  }
   const desktop = await withCancellation(
     (sig) => desktopPair({
       serverUrl,
@@ -16407,7 +16465,8 @@ async function handleLogin(args, signal) {
     if (!r.ok) return text(`${r.message} Call literati_login again to retry.`, true);
     return finishLogin(r.body);
   }
-  return text(desktopOutcomeMessage(desktop, "call literati_login again"), true);
+  const byCode = desktop.kind === "unavailable" || desktop.kind === "server_mismatch" ? { pairUrl: await fetchPairPageUrl(serverUrl), paste: PASTE } : void 0;
+  return text(desktopOutcomeMessage(desktop, "call literati_login again", byCode), true);
 }
 async function finishLogin(body) {
   remoteTools = await fetchRemoteTools();
@@ -16428,7 +16487,7 @@ async function handleRemoteTool(name, args) {
   const cred = activeCredential();
   if (!cred) {
     return text(
-      "Not logged in to Literati. Call literati_login to pair this directory through the Literati desktop app (no project URL needed up front).",
+      "Not logged in to Literati. Call literati_login to pair this directory through the Literati desktop app, or with a code from the Literati web pairing page (no project URL needed up front).",
       true
     );
   }

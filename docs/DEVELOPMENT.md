@@ -59,9 +59,9 @@ Run `/literati:login`.
 
 Pairing goes through the Literati desktop app (signed in, against the same server as the plugin): a Literati window opens (launched via `literati://cli-pair` if it isn't running); pick the project and click Accept. Nothing to paste — the plugin gets the code from the app's local connector (`127.0.0.1:21279`, override with `LITERATI_CONNECTOR_URL`).
 
-**No desktop app** (not installed, or it couldn't be started within ~30s): pairing is refused and the message points at https://literati.ai/download. There is no other way to pair.
+**No desktop app** (not installed, or it couldn't be started within ~30s): the message names the download link and the web app's pairing page (`<webAppUrl>/pair`, from the server's `GET /config/public` — `http://localhost:3010/pair` in dev). On the page, signed in, pick the project, type a machine name and copy the 8-character code; then `/literati:login <code>` (which runs `node scripts/login.mjs complete <code>`, or `literati_login({code})` once the tools are loaded). The plugin exchanges it with `POST /cli/pairing/exchange {code}` — no request id, the desktop app is not consulted. Codes last 10 minutes and work once; the machine name becomes the token name, and pairing the same name again replaces that token.
 
-**Different server** (typical in dev: the app on production, the plugin on `LITERATI_SERVER_URL=http://localhost:3000`): pairing fails with a message naming both URLs. Point the app at the same server as the plugin (a dev build of the app for a local server), or the plugin at the app's server via `LITERATI_SERVER_URL`, and pair again.
+**Different server** (typical in dev: the app on production, the plugin on `LITERATI_SERVER_URL=http://localhost:3000`): pairing fails with a message naming both URLs. Point the app at the same server as the plugin (a dev build of the app for a local server), or the plugin at the app's server via `LITERATI_SERVER_URL`, and pair again — or pair with a code from the pairing page the message names (it belongs to the plugin's server).
 
 The pairing token is stored in `~/.literati/credentials.json` (chmod 600),
 scoped to that one project and bound to the directory you paired from (and its

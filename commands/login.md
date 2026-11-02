@@ -2,7 +2,7 @@
 description: Set up Literati in Claude Code — register the literati MCP server and pair this directory with a project
 ---
 
-Set up Literati for this user: ensure the `literati` MCP server is registered at user scope, then pair this working directory with their Literati project. A project URL may optionally have been provided as `$ARGUMENTS`.
+Set up Literati for this user: ensure the `literati` MCP server is registered at user scope, then pair this working directory with their Literati project. A project URL, or an 8-character pairing code from Literati's web pairing page, may optionally have been provided as `$ARGUMENTS`.
 
 ## 1. Ensure the MCP server is registered
 
@@ -22,9 +22,14 @@ Check pairing: `node "${CLAUDE_PLUGIN_ROOT}/scripts/login.mjs" status`
 
 **Already paired is not a reason to stop** — with one exception: if step 1 just registered the MCP server for a folder that is already paired, that was the whole job; tell them to restart Claude Code and stop here. Otherwise, running this command on a paired folder means the user wants to pair again — to switch projects, or to refresh a revoked login. Tell them which project it is paired with now, then start pairing below exactly as for a fresh folder; the new pairing takes over for this folder. Never reply "it's already paired".
 
-Start pairing **right away — do NOT ask for a project URL first.** Pairing happens in the Literati desktop app: the user picks the project in a Literati window and clicks Accept, and nothing needs pasting. Without the app (not installed, or it can't be started) pairing is refused — there is no other way to pair. Pass a project URL only if `$ARGUMENTS` already has one (it preselects that project).
+Start pairing **right away — do NOT ask for a project URL first.** Pairing happens in the Literati desktop app: the user picks the project in a Literati window and clicks Accept, and nothing needs pasting. Without the app (not installed, or it can't be started) the user pairs with a code from Literati's web pairing page instead — see "With a pairing code" below. Pass a project URL only if `$ARGUMENTS` already has one (it preselects that project).
 
-1. **Before** starting, tell the user: "A Literati window will open — pick the project and click Accept." (The call blocks until they do, so you can't say it afterwards.)
+**With a pairing code.** If `$ARGUMENTS` is an 8-character pairing code (letters and digits like `K7QM2XPT` — not a URL, not a 24-character project id), or the user gives you one later, they already created it on the web pairing page: skip the desktop app and exchange the code —
+   - If the `mcp__literati__*` tools are available in this session, call `literati_login` with `code`.
+   - Otherwise run `node "${CLAUDE_PLUGIN_ROOT}/scripts/login.mjs" complete <code>`.
+   Then read the result as in step 3 below. **A code that is not correct / expired / already used / not unique** → relay the message as-is: it says to create a new code on the pairing page. Ask the user for the new code and exchange it the same way.
+
+1. **Before** starting, tell the user: "A Literati window will open — pick the project and click Accept." (The call blocks until they do, so you can't say it afterwards. Skip this when exchanging a code: nothing opens.)
 2. Start pairing:
    - If the `mcp__literati__*` tools are available in this session, call
      `literati_login` (with `project_url` only if you have one).
@@ -34,9 +39,9 @@ Start pairing **right away — do NOT ask for a project URL first.** Pairing hap
      default Bash timeout.
 3. Read the result:
    - **"Logged in to Literati project …"** → paired; go to section 3.
-   - **Desktop app isn't installed, couldn't be started, or is too old** → relay the message as-is: it points them at https://literati.ai/download; they install it, open it, sign in, then run `/literati:login` again. Do not ask for a project URL; there is no other way to pair.
+   - **Desktop app isn't installed, couldn't be started, or is too old** → relay the message as-is: it gives two ways forward — install the app from https://literati.ai/download, or open the pairing page URL it names in a browser where they are signed in to Literati, pick the project and copy the 8-character code. Ask the user for the code, then exchange it as in "With a pairing code" above. Do not ask for a project URL.
    - **Declined / expired / didn't show the window / not signed in / a request already open** → relay the message as-is; they run `/literati:login` again when ready.
-   - **Server mismatch** (the desktop app is connected to a different server than this plugin talks to) → relay the message as-is: it names both servers and says they must match (`LITERATI_SERVER_URL` for the plugin). Do not ask for a project URL.
+   - **Server mismatch** (the desktop app is connected to a different server than this plugin talks to) → relay the message as-is: it names both servers and says they must match (`LITERATI_SERVER_URL` for the plugin), or that they can pair with a code from the pairing page it names. Do not ask for a project URL.
 
 ## 3. Finish — welcome them to the project
 
