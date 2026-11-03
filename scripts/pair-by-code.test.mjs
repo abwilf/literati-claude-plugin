@@ -276,7 +276,11 @@ test('CLI: start with no desktop app names the pairing page and the paste step i
   const srv = await literati(t);
   const { home, cwd } = cliEnv(t);
 
-  const r = await run(['start'], { home, cwd, url: srv.url, connectorUrl: await deadServer() });
+  // Reachable but no /cli-pair/hello (404), like an older app: `unavailable` at
+  // once. A dead port would make the CLI run `open literati://cli-pair`, which
+  // launches the real desktop app on the machine running the tests.
+  const noApp = await stubServer(t, {});
+  const r = await run(['start'], { home, cwd, url: srv.url, connectorUrl: noApp.url });
 
   assert.equal(r.status, 1);
   assert.match(r.stderr, new RegExp(`${WEB}/pair`.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')));
