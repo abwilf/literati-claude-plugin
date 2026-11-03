@@ -19,13 +19,13 @@ const REGISTERED = JSON.stringify({
 const INSTALLED_VERSION = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version;
 
 /** Fresh HOME (welcome already shown) + optional isolated config dir. */
-function setup({ homeConfig, isolatedConfig, paired = false, serverUrl = 'http://127.0.0.1:9' }) {
+function setup({ homeConfig, isolatedConfig, paired = false, welcomed = true, serverUrl = 'http://127.0.0.1:9' }) {
   const root = mkdtempSync(join(tmpdir(), 'literati-hook-'));
   const home = join(root, 'home');
   const cwd = join(root, 'work');
   mkdirSync(join(home, '.literati'), { recursive: true });
   mkdirSync(cwd);
-  writeFileSync(join(home, '.literati', 'welcomed'), 'x');
+  if (welcomed) writeFileSync(join(home, '.literati', 'welcomed'), 'x');
   if (homeConfig !== undefined) writeFileSync(join(home, '.claude.json'), homeConfig);
   if (paired) {
     const key = `${serverUrl}|c1`;
@@ -96,6 +96,18 @@ test('paired directory + unregistered server: context denies tools and points at
   assert.match(ctx, /NO `mcp__literati__\*` tools are available/);
   assert.match(ctx, /\/literati:login/);
   assert.doesNotMatch(ctx, /operate on that project's server-side files/);
+});
+
+test('first run: the welcome banner says how to connect, with the desktop app or with a code from the pairing page', () => {
+  const { cwd, env } = setup({ homeConfig: REGISTERED, welcomed: false });
+  const r = spawnSync(process.execPath, [HOOK], { cwd, env, input: JSON.stringify({ cwd }), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const { systemMessage } = JSON.parse(r.stdout);
+  assert.ok(systemMessage, 'the banner is shown to the user');
+  assert.match(
+    systemMessage,
+    /To get connected, run \/literati:login\. Claude registers the Literati tools and starts the login\. With the Literati desktop app \(download: https:\/\/literati\.ai\/download\) a Literati window opens — pick the project and click Accept\. On a machine without the app, create a code on the Literati web app's pairing page and run \/literati:login <code>\. Claude tells you when to restart\. Logins are directory-specific: pair each project directory once\./,
+  );
 });
 
 // Stale-plugin nudge: the server reports the latest published plugin version

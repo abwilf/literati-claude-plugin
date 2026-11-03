@@ -13,7 +13,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT, DEAD_SERVER, tempHome, session, stubServer, toolNames, callTool } from './mcp-test-helpers.mjs';
+import { ROOT, deadServer, tempHome, session, stubServer, toolNames, callTool } from './mcp-test-helpers.mjs';
 
 const CATALOG = JSON.parse(readFileSync(join(ROOT, 'mcp', 'tool-catalog.json'), 'utf8'));
 const LOGIN_TOOLS = ['literati_login'];
@@ -47,7 +47,8 @@ test('unpaired: a catalog tool says how to log in', { timeout: 30_000 }, async (
 });
 
 test('paired, server down: Codex keeps the catalog, Claude Code the login tool', { timeout: 30_000 }, async (t) => {
-  const { results: [codexList, codexCall] } = await session(tempHome(t, DEAD_SERVER), 'codex-mcp-client', [
+  const dead = await deadServer();
+  const { results: [codexList, codexCall] } = await session(tempHome(t, dead), 'codex-mcp-client', [
     ['tools/list', {}],
     callTool(CATALOG_NAMES[0]),
   ]);
@@ -55,7 +56,7 @@ test('paired, server down: Codex keeps the catalog, Claude Code the login tool',
   assert.equal(codexCall.isError, true);
   assert.match(codexCall.content[0].text, /Literati request failed/);
 
-  const { results: [claudeList] } = await session(tempHome(t, DEAD_SERVER), 'claude-code', [['tools/list', {}]]);
+  const { results: [claudeList] } = await session(tempHome(t, dead), 'claude-code', [['tools/list', {}]]);
   assert.deepEqual(toolNames(claudeList), LOGIN_TOOLS);
 });
 

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-26",
+  "generatedAt": "2026-11-03",
   "tools": [
     {
       "name": "list_papers",
@@ -298,7 +298,7 @@
     },
     {
       "name": "inspect",
-      "description": "Look at one page of this project's compiled PDF and ask a specific question about it (figure/table placement, clipped or overfull content, how an equation or layout renders, what a page contains). Pass either page (1-based), or file_path + line to see the page where that source line was typeset (mapped via SyncTeX). A separate vision model sees the page image and returns only a text answer; the image never enters this conversation and every call is independent with no memory, so put all needed context into question. If the compiled PDF is missing or older than the source files, the project is compiled on the server first (this can take a minute).",
+      "description": "Look at one page of this project's compiled PDF and ask a specific question about it (figure/table placement, clipped or overfull content, how an equation or layout renders, what a page contains). Pass either page (1-based), or file_path + line to see the page where that source line was typeset (mapped via SyncTeX). A separate vision model sees the page image and returns only a text answer; the image never enters this conversation and every call is independent with no memory, so put all needed context into question. If the compiled PDF is missing or older than the source files, the project is compiled on the server first (this can take a minute); with read-only access the previous PDF is used instead and the answer says so.",
       "inputSchema": {
         "type": "object",
         "properties": {

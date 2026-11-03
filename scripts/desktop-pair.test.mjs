@@ -1,7 +1,7 @@
 // Desktop pairing: the plugin asks the running Literati desktop app's local
-// connector for a code, and refuses to pair when there is no usable app — the
-// app is the only way to pair, so nothing here may ever POST
-// /cli/pairing/requests. Fake connector + fake Literati server over real
+// connector for a code, and refuses to pair when there is no usable app —
+// pointing at the web pairing page instead (pair-by-code.test.mjs); nothing
+// here may ever POST /cli/pairing/requests. Fake connector + fake Literati server over real
 // HTTP; the MCP-server tests drive the BUILT mcp/bundle.mjs — rebuild first.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { desktopPair, desktopOutcomeMessage } from '../lib/pairing.mjs';
-import { tempHome, session, stubServer, callTool, textOf } from './mcp-test-helpers.mjs';
+import { tempHome, session, stubServer, callTool, textOf, deadServer } from './mcp-test-helpers.mjs';
 
 const LOGIN = fileURLToPath(new URL('./login.mjs', import.meta.url));
 
@@ -72,28 +72,27 @@ const literati = () =>
         : [400, { code: 'PAIRING_INVALID_CODE' }],
   });
 
-const deadPort = async () => {
-  const s = await fake({});
-  s.server.close();
-  return s.url;
-};
-
 // `launch` is stubbed so a missed 1 s probe on a loaded machine can never
 // run the real `open literati://cli-pair`; the launch tests override it.
 const base = { serverUrl: 'http://srv', cwd: '/tmp/x', requesterLabel: 'me@host', launch: async () => false };
 
-test('unreachable app, launch fails → unavailable, whose message refuses and names the download page', async () => {
+test('unreachable app, launch fails → unavailable, whose message refuses: the pairing page first, then the download', async () => {
   let launches = 0;
   const r = await desktopPair({
     ...base,
-    connectorUrl: await deadPort(),
+    connectorUrl: await deadServer(),
     launch: async () => (launches++, false),
   });
   assert.deepEqual(r, { kind: 'unavailable' });
   assert.equal(launches, 1);
   assert.equal(
+    desktopOutcomeMessage(r, 'retry', { pairUrl: 'https://web/pair', paste: 'paste it' }),
+    "No Literati desktop app found (not installed, couldn't be started, or too old for CLI pairing). Pair without it: open https://web/pair in a browser where the user is signed in to Literati, pick the project, type a machine name and copy the 8-character code it shows, then paste it. Or install the app: download the latest from https://literati.ai/download, open it and sign in, then retry.",
+  );
+  // A caller that offers no code path still gets the download.
+  assert.equal(
     desktopOutcomeMessage(r, 'retry'),
-    "The Literati desktop app isn't installed, couldn't be started, or is too old for CLI pairing. Pairing needs it: download the latest from https://literati.ai/download, open it and sign in, then retry.",
+    "No Literati desktop app found (not installed, couldn't be started, or too old for CLI pairing). Install it: download the latest from https://literati.ai/download, open it and sign in, then retry.",
   );
 });
 
@@ -349,10 +348,11 @@ test('CLI: server mismatch → failure naming both servers; no project-URL promp
       assert.match(r.stderr, /connected to https:\/\/api\.literati\.ai/);
       assert.ok(r.stderr.includes(`this plugin talks to ${srv.url}`), r.stderr);
       assert.match(r.stderr, /LITERATI_SERVER_URL/);
+      assert.match(r.stderr, /type a machine name and copy the 8-character code it shows, then run `login\.mjs complete <code>` here\./);
       assert.doesNotMatch(r.stderr, /project URL/);
       assert.doesNotMatch(r.stdout, /Pairing request sent/);
     }
-    assert.equal(srv.seen.length, 0, 'no code flow, no exchange');
+    assert.ok(!srv.seen.some((s) => s.url.startsWith('/cli/pairing')), 'no code flow, no exchange');
     assert.ok(!conn.seen.some((s) => s.method === 'POST'), 'must not create a pair request');
   } finally {
     srv.server.close();
@@ -370,10 +370,11 @@ test('CLI: no usable desktop app (something on the connector port, no /cli-pair/
       const r = await run(args, { home, cwd, url: srv.url, connectorUrl: old.url });
       assert.equal(r.status, 1, r.stdout);
       assert.match(r.stderr, /https:\/\/literati\.ai\/download/);
+      assert.match(r.stderr, /type a machine name and copy the 8-character code it shows, then run `login\.mjs complete <code>` here\./);
       assert.doesNotMatch(r.stderr, /project URL/);
       assert.doesNotMatch(r.stdout, /Pairing request sent/);
     }
-    assert.equal(srv.seen.length, 0, 'no code flow, no exchange');
+    assert.ok(!srv.seen.some((s) => s.url.startsWith('/cli/pairing')), 'no code flow, no exchange');
   } finally {
     srv.server.close();
     old.server.close();
@@ -399,13 +400,33 @@ test('CLI: the app approves but the server rejects the code → failure with the
   }
 });
 
+test('CLI: the app approves but the project was deleted meanwhile → the id-path message, then the retry hint (the app reopens its picker); nothing saved', async () => {
+  const srv = await fake({
+    'POST /cli/pairing/requests/req-9/exchange': () => [404, { error: 'Project not found', code: 'PAIRING_PROJECT_GONE' }],
+  });
+  const conn = await connector({ serverUrl: srv.url, polls: [{ status: 'approved', requestId: 'req-9', code: 'DESKCODE' }] });
+  const { home, cwd } = await cliEnv();
+  try {
+    const r = await run(['start'], { home, cwd, url: srv.url, connectorUrl: conn.url });
+    assert.equal(r.status, 1, r.stdout);
+    // The by-code wording ("this code was for", the pairing page) would send the user to mint a code for nothing.
+    assert.equal(r.stderr.trim(), 'The project you picked no longer exists. Run `login.mjs start` again to retry.');
+    assert.equal(srv.seen.filter((s) => s.url.endsWith('/exchange')).length, 1);
+    assert.ok(!existsSync(join(home, '.literati', 'credentials.json')));
+  } finally {
+    srv.server.close();
+    conn.server.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('CLI: the code command is gone', async () => {
   const srv = await literati();
   const { home, cwd } = await cliEnv();
   try {
-    const r = await run(['code', 'ABCD1234'], { home, cwd, url: srv.url, connectorUrl: await deadPort() });
+    const r = await run(['code', 'ABCD1234'], { home, cwd, url: srv.url, connectorUrl: await deadServer() });
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /Usage: login\.mjs <start \[project-url\] \| status>/);
+    assert.match(r.stderr, /Usage: login\.mjs <start \[project-url\] \| complete <code> \| status>/);
     assert.equal(srv.seen.length, 0);
   } finally {
     srv.server.close();
@@ -459,6 +480,7 @@ test('MCP: no usable desktop app → literati_login refuses with the download li
   for (const r of results) {
     assert.equal(r.isError, true, textOf(r));
     assert.match(textOf(r), /https:\/\/literati\.ai\/download/);
+    assert.match(textOf(r), /type a machine name and copy the 8-character code it shows, then call literati_login again with that code as `code`\./);
     assert.doesNotMatch(textOf(r), /project URL/);
   }
   assert.ok(!srv.requests.some((r) => r.url === '/cli/pairing/requests'), 'no code-flow request');
@@ -481,10 +503,11 @@ test('MCP: server mismatch → literati_login fails naming both servers; no proj
     assert.ok(textOf(r).includes(`this plugin talks to ${srv.url}`), textOf(r));
     assert.match(textOf(r), /LITERATI_SERVER_URL/);
     assert.match(textOf(r), /call literati_login again/);
+    assert.match(textOf(r), /type a machine name and copy the 8-character code it shows, then call literati_login again with that code as `code`\./);
     assert.doesNotMatch(textOf(r), /project URL/);
     assert.doesNotMatch(textOf(r), /Pairing request sent/);
   }
-  assert.equal(srv.requests.length, 0, 'no code flow, no exchange');
+  assert.ok(!srv.requests.some((r) => r.url.startsWith('/cli/pairing')), 'no code flow, no exchange');
   assert.ok(!conn.requests.some((r) => r.method === 'POST'), 'must not create a pair request');
 });
 
