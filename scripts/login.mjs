@@ -21,18 +21,22 @@
 import os from 'node:os';
 import { getCredentialForDir } from '../lib/credentials.mjs';
 import {
+  CODE_SHAPE,
+  NO_NEXT_STEP,
+  RETRY_SAME_CODE,
   desktopPair,
   desktopOutcomeMessage,
   exchangePairingCode,
   fetchPairPageUrl,
   isPairingCode,
+  normalizeServerUrl,
   withCancellation,
 } from '../lib/pairing.mjs';
 
 // Must match mcp/index.mjs — this is the host a NEW pairing is created
 // against. Production by default so a fresh install works unconfigured;
 // set LITERATI_SERVER_URL for local development (see README.md).
-const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'https://api.literati.ai';
+const DEFAULT_SERVER_URL = normalizeServerUrl(process.env.LITERATI_SERVER_URL) || 'https://api.literati.ai';
 // Only Claude Code's /literati:login runs this script (labels only — see
 // clientHeaders in mcp/index.mjs).
 const CLIENT_HEADERS = { 'X-Literati-Client': 'claude-code' };
@@ -95,20 +99,22 @@ async function start(projectUrl) {
 async function complete(code) {
   if (!code) return fail(USAGE);
   if (!isPairingCode(code)) {
-    return fail(
-      "That doesn't look like a Literati pairing code (8 letters and digits, e.g. K7QM2XPT). Copy it from the pairing page and try again.",
-    );
+    return fail(`That doesn't look like a Literati pairing code (${CODE_SHAPE}). Copy it from the pairing page and try again.`);
   }
   const serverUrl = DEFAULT_SERVER_URL;
   const r = await exchangePairingCode({ serverUrl, code, cwd: process.cwd(), headers: CLIENT_HEADERS });
   if (!r.ok) {
-    // Unreachable or rate-limited: the code is still good, so say to retry it;
-    // anything else means the code is spent and only a new one will do.
-    const next =
-      r.reason === 'network' || r.reason === 'rate_limited'
-        ? `Then ${PASTE} again with the same code.`
-        : `Create a new code at ${await pairPageOr(serverUrl)} and ${PASTE} again.`;
-    return fail(`${r.message} ${next}`);
+    // What the code is still good for decides the next step (see
+    // exchangePairingCode): the same one again, a check before retyping it,
+    // a new one, or nothing a code can fix.
+    let next = '';
+    if (RETRY_SAME_CODE.has(r.reason)) next = `Then ${PASTE} with the same code.`;
+    else if (r.reason === 'invalid_code') {
+      next = `Check the code and ${PASTE} again; only if it expired or was already used, create a new one at ${await pairPageOr(serverUrl)} first.`;
+    } else if (!NO_NEXT_STEP.has(r.reason)) {
+      next = `Create a new code at ${await pairPageOr(serverUrl)} and ${PASTE}.`;
+    }
+    return fail(next ? `${r.message} ${next}` : r.message);
   }
   return loggedIn(r.body.projectName);
 }

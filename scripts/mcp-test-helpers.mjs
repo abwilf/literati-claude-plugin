@@ -12,7 +12,24 @@ import { fileURLToPath } from 'node:url';
 export const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BUNDLE = join(ROOT, 'mcp', 'bundle.mjs');
 const REPLY_TIMEOUT_MS = 10_000;
-export const DEAD_SERVER = 'http://127.0.0.1:9';
+/** A port nobody listens on (reserved and released right now, so a stub
+ * started since module load cannot sit on it): a connection is refused
+ * outright. Not port 9: fetch rejects the well-known "bad ports" before
+ * connecting, with no ECONNREFUSED to show. */
+export async function deadPort() {
+  const srv = createServer();
+  srv.listen(0, '127.0.0.1');
+  await once(srv, 'listening');
+  const { port } = srv.address();
+  srv.close();
+  await once(srv, 'close');
+  return port;
+}
+
+/** A server (or connector) URL nobody listens on — see deadPort(). */
+export async function deadServer() {
+  return `http://127.0.0.1:${await deadPort()}`;
+}
 
 /** A throwaway HOME (removed after the test); optionally paired to `serverUrl`. */
 export function tempHome(t, serverUrl) {
@@ -39,10 +56,11 @@ export function tempHome(t, serverUrl) {
  * Start the server as `clientName` in `home`, run `requests` in order.
  * Returns `{ init, results }` — the initialize result and each request's result.
  */
-export async function session(home, clientName, requests, { serverUrl = DEAD_SERVER, env = {} } = {}) {
+export async function session(home, clientName, requests, { serverUrl, env = {} } = {}) {
   if (!env.LITERATI_CONNECTOR_URL && requests.some(([m, p]) => m === 'tools/call' && p?.name === 'literati_login')) {
     throw new Error('literati_login needs env.LITERATI_CONNECTOR_URL (a stub), or the test launches the real desktop app');
   }
+  serverUrl ??= await deadServer();
   const child = spawn(process.execPath, [BUNDLE], {
     cwd: home,
     // Unpaired calls resolve against this; nothing here may reach a real server
@@ -98,8 +116,9 @@ export async function session(home, clientName, requests, { serverUrl = DEAD_SER
 
 /**
  * A stand-in Literati server. `routes` maps "METHOD /path" to a JSON body, or
- * to a function `(body, res) => json` that may set `res.statusCode`. Every
- * request is recorded in `requests` with its headers. Unknown routes → 404.
+ * to a function `(body, res) => json` that may set `res.statusCode` — or end
+ * the response itself, for a non-JSON body. Every request is recorded in
+ * `requests` with its headers. Unknown routes → 404.
  */
 export async function stubServer(t, routes) {
   const requests = [];
@@ -119,7 +138,8 @@ export async function stubServer(t, routes) {
       res.statusCode = 404;
       return res.end('{}');
     }
-    res.end(JSON.stringify(typeof route === 'function' ? route(body, res) : route));
+    const out = typeof route === 'function' ? route(body, res) : route;
+    if (!res.writableEnded) res.end(JSON.stringify(out));
   });
   srv.listen(0, '127.0.0.1');
   await once(srv, 'listening');

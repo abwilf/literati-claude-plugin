@@ -63,10 +63,7 @@ Pairing goes through the Literati desktop app (signed in, against the same serve
 
 **Different server** (typical in dev: the app on production, the plugin on `LITERATI_SERVER_URL=http://localhost:3000`): pairing fails with a message naming both URLs. Point the app at the same server as the plugin (a dev build of the app for a local server), or the plugin at the app's server via `LITERATI_SERVER_URL`, and pair again — or pair with a code from the pairing page the message names (it belongs to the plugin's server).
 
-The pairing token is stored in `~/.literati/credentials.json` (chmod 600),
-scoped to that one project and bound to the directory you paired from (and its
-subdirectories). Revoke tokens anytime in Literati under Settings → CLI
-tokens.
+The pairing token is stored in `~/.literati/credentials.json` (chmod 600), scoped to that one project and bound to the directory you paired from (and its subdirectories). Revoke tokens anytime in Literati under Settings → CLI & agent tokens.
 
 ## Developing
 
@@ -84,11 +81,11 @@ cd mcp && npm install && npm run build       # regenerates mcp/bundle.mjs
 claude plugin update literati@literati
 ```
 
-The version bump matters twice: it ships the new plugin AND triggers the
-SessionStart hook to refresh the stable bundle copy at
-`~/.literati/mcp/bundle.mjs` (compared via `~/.literati/mcp/manifest.json`).
+The version bump ships the new plugin. The SessionStart hook refreshes the stable bundle copy at `~/.literati/mcp/bundle.mjs` whenever the bundle's content changes (sha256 in `~/.literati/mcp/manifest.json`), version bump or not.
 
 After the new version is pushed to the marketplace (never before, or every install is told to run an update that does nothing), bump `LATEST_PLUGIN_VERSION` in the Literati server (`server/src/services/mcp-agent/context.ts`) to the same version: `GET /mcp-agent/context` reports it as `pluginVersion`, and the SessionStart hook tells older installs to update when that is newer than the version they run.
+
+0.7.3 depends on the server having `POST /cli/pairing/exchange` and the web app serving `/pair`. Deploy the server, then the web app, then publish the plugin, then bump `LATEST_PLUGIN_VERSION`. Published first, every machine without the desktop app is sent to a page that 404s.
 
 When the server's tool list changes (`GET /mcp-agent/tools`), regenerate the
 catalog Codex sees before a folder is paired, then rebuild. Run it from a

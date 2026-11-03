@@ -13,7 +13,7 @@ claude plugin marketplace add abwilf/literati-claude-plugin && claude plugin ins
 
 Then open Claude Code in your project folder and type `/literati:login`. Approve the commands it runs; the Literati desktop app opens a project picker — pick the project and click Accept. No project id needed; the folder (and its subfolders) is paired with that project. In Codex, install the same plugin (`codex plugin marketplace add abwilf/literati-claude-plugin && codex plugin add literati@literati`) and ask it to call `literati_login` from the project folder.
 
-No desktop app on that machine (a remote box over SSH, say)? Open the Literati web app's pairing page — `/pair`, the login message names the full URL — in a browser where you're signed in, pick the project, name the machine, and run `/literati:login <code>` with the 8-character code it shows (Codex: ask it to log in to Literati with that code). Codes last 10 minutes and work once.
+No desktop app on that machine (a remote box over SSH, say)? Open https://literati.ai/pair (the login message names the page for your server) in a browser where you're signed in, pick the project, name the machine, and run `/literati:login <code>` with the 8-character code it shows (Codex: ask it to log in to Literati with that code). Codes last 10 minutes and work once.
 
 ## Updating
 

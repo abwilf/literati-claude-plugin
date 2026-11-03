@@ -47,7 +47,7 @@ overview (edit/compile LaTeX, papers, session sync), pointing at
 (`~/.literati/welcomed` marker); later unpaired sessions just offer login
 when relevant.
 
-Pairing goes only through the Literati desktop app, so have it running and signed in against the SAME server as the plugin — for this dev pass, a dev build of the app pointed at `http://localhost:3000`. (An app on production while the plugin is on localhost fails with a server-mismatch message; no app at all refuses with the download link — both are checked in step 6.)
+Pairing goes through the Literati desktop app by default, so have it running and signed in against the SAME server as the plugin — for this dev pass, a dev build of the app pointed at `http://localhost:3000`. (An app on production while the plugin is on localhost fails with a server-mismatch message; no app at all names the download link and the pairing page — both are checked in step 6, and the code path in step 7.)
 
 Run `/literati:login` (or paste your project URL, `http://localhost:3010/project/<id>` — it preselects that project in the picker):
 1. **Expect:** Claude registers the MCP server via Bash (you approve the `claude mcp add --scope user literati -- node ~/.literati/mcp/bundle.mjs` command; for dev it should include `-e LITERATI_SERVER_URL=…` after `literati`), says "A Literati window will open — pick the project and click Accept", then starts pairing via `scripts/login.mjs`.
@@ -55,9 +55,9 @@ Run `/literati:login` (or paste your project URL, `http://localhost:3010/project
 3. **Expect:** "Logged in to <project>", and Claude tells you to restart Claude Code to load the tools.
 4. Restart. **Expect:** `/mcp` shows a server named `literati` (NO `plugin:` prefix); ~19 tools namespaced `mcp__literati__*`; a tool call renders as `literati - list_files (MCP)`.
 5. Re-pair: run `/literati:login` again in the same folder. **Expect:** Claude names the current project, does NOT answer "already paired", and calls `literati_login`; the Literati window opens again; after Accept the tools are available right away, **without a restart** (pick a different project to see the folder switch).
-6. The other outcomes, each on a fresh `/literati:login`: click **Decline** → "declined" message, nothing paired, no fallback offered; leave the window alone for ~3 minutes → "expired" message; quit the app and make it unlaunchable (move `Literati.app` to the Trash and confirm `open literati://cli-pair` fails first; a renamed bundle is often still found by LaunchServices) → refusal pointing at https://literati.ai/download, no project-URL question (an app that is merely closed gets launched instead); app signed in to production while the plugin is on localhost → server-mismatch message naming both URLs.
+6. The other outcomes, each on a fresh `/literati:login`: click **Decline** → "declined" message, nothing paired, no fallback offered; leave the window alone for ~3 minutes → "expired" message; quit the app and make it unlaunchable (move `Literati.app` to the Trash and confirm `open literati://cli-pair` fails first; a renamed bundle is often still found by LaunchServices) → refusal pointing at https://literati.ai/download and at the pairing page, no project-URL question (an app that is merely closed gets launched instead); app signed in to production while the plugin is on localhost → server-mismatch message naming both URLs.
 
-7. Pairing with a code (no desktop app): quit the app and make it unlaunchable as in step 6, run `/literati:login` in a fresh folder. **Expect:** the refusal names both https://literati.ai/download and the pairing page (`http://localhost:3010/pair` in dev), and Claude asks you for the code — never for a project URL. Open the page signed in, pick the project, type a machine name, copy the code; paste it (or run `/literati:login <code>`). **Expect:** Claude runs `login.mjs complete <code>` (or `literati_login` with `code`), "Logged in to <project>", and the tokens page lists `Claude Code (<machine name>)`. Paste the same code again → "already used" message with the pairing-page hint; a mistyped one → "doesn't look like a Literati pairing code", no request sent.
+7. Pairing with a code (no desktop app): quit the app and make it unlaunchable as in step 6, run `/literati:login` in a fresh folder. **Expect:** the refusal names both https://literati.ai/download and the pairing page (`http://localhost:3010/pair` in dev), and Claude asks you for the code — never for a project URL. Open the page signed in, pick the project, type a machine name, copy the code; paste it (or run `/literati:login <code>`). **Expect:** Claude runs `login.mjs complete <code>` (or `literati_login` with `code`), "Logged in to <project>", and the tokens page lists `Claude Code (<machine name>)`. Paste the same code again → the same "not correct, or it expired or was already used" message as a wrong code (the server does not tell a used code from a wrong one), naming the pairing page; a fresh code pairs again. A malformed one (wrong length, or a 0/O/1/I) → "doesn't look like a Literati pairing code", no request sent; a well-formed but wrong one (a character swapped for another from A–Z/2–9) → sent, that same "not correct, or it expired or was already used" message saying to check the code first. A trailing slash in `LITERATI_SERVER_URL` (`http://localhost:3000/`) must still pair — the plugin strips it.
 
 **Per-directory scoping:** `cd` to a different directory, run `claude`, ask
 about the project — **expect** logged-out + login offer (credentials bind to
@@ -142,7 +142,7 @@ After a session that used Literati tools:
 
 ## 10. Revocation + recovery
 
-- Web app → Settings → CLI tokens: revoke the token.
+- Web app → Settings → CLI & agent tokens: revoke the token.
 - Next Literati tool call in Claude Code → "login expired — re-pair" →
   running the login flow again recovers.
 - Restore your dev credential when done:
@@ -167,6 +167,7 @@ LITERATI_SERVER_URL=http://localhost:3000 codex --no-daemon
 - `/mcp` → `literati: connected (20 tools)` even before pairing, in the very
   first session after install.
 - "connect to <project URL>" (no tool name) → the Literati window opens with that project preselected → Accept → **without restarting**, "list the papers in this Literati project" works.
+- Code pairing: quit the app, `cd` to another fresh folder, say "log in to Literati with code <code>" (a code from the pairing page, `http://localhost:3010/pair`) → `literati_login` is called with `code`, no window opens, "Logged in to <project>. The Literati tools are ready — call them directly (e.g. …)"; the tokens page shows `Codex (<machine name>)`, replacing the machine's Claude Code token for that project.
 - A second folder paired to another project only sees its own project.
 - Read 10 lines of `main.tex`, then `write` → refused; `edit` + `compile` work.
 - Claude Code in the same folder: one `literati` server, same pairing.
@@ -181,6 +182,6 @@ LITERATI_SERVER_URL=http://localhost:3000 codex --no-daemon
 | Tools missing | `/mcp` — is `literati` connected? `claude mcp get literati` registered and pointing at `~/.literati/mcp/bundle.mjs`? Registered with `-e LITERATI_SERVER_URL` for dev? |
 | No /resume entry | `ls ~/.literati/sessions/` — no marker means no Literati tool ran (PostToolUse matcher) |
 | Compile/tree not refreshing in browser | Hard-refresh the tab (new bundle needed after renderer changes) |
-| Plugin edits not taking effect | Bump version in `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, rebuild `mcp/bundle.mjs`, `claude plugin update literati@literati`, restart session (the SessionStart hook refreshes `~/.literati/mcp/bundle.mjs` on version change). Codex: `codex plugin marketplace upgrade` first, then `codex plugin add literati@literati` — without the upgrade, `add` reinstalls the stale snapshot — and it runs the new version in the next session |
+| Plugin edits not taking effect | Bump version in `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, rebuild `mcp/bundle.mjs`, `claude plugin update literati@literati`, restart session (the SessionStart hook refreshes `~/.literati/mcp/bundle.mjs` whenever the bundle's content changes — hash in `manifest.json` — version bump or not). Codex: `codex plugin marketplace upgrade` first, then `codex plugin add literati@literati` — without the upgrade, `add` reinstalls the stale snapshot — and it runs the new version in the next session |
 | Codex: `literati` failed to start | Stderr names the cause; `ls ~/.literati/mcp/codex/` — empty and no plugin cache means reinstall (`codex plugin add literati@literati`), then trust the hook in `/hooks` |
 | Two tool sets (duplicated tools) | A legacy sideload (`--plugin-dir`) or ≤0.5.2 plugin-declared server is active alongside the user-scope one — remove the sideload / update the plugin |

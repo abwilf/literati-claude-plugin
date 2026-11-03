@@ -26,11 +26,15 @@ import { getCredentialForDir } from '../lib/credentials.mjs';
 // Snapshot of the server's tool list (scripts/snapshot-tool-catalog.mjs).
 import TOOL_CATALOG from './tool-catalog.json' with { type: 'json' };
 import {
+  CODE_SHAPE,
+  NO_NEXT_STEP,
+  RETRY_SAME_CODE,
   desktopPair,
   desktopOutcomeMessage,
   exchangePairingCode,
   fetchPairPageUrl,
   isPairingCode,
+  normalizeServerUrl,
   withCancellation,
 } from '../lib/pairing.mjs';
 
@@ -46,7 +50,7 @@ const activeCredential = () => getCredentialForDir(process.cwd());
 // see README.md. Note the host is only consulted when a directory is FIRST
 // paired; after that it is stored per-directory in credentials.json, so the
 // env var is not needed again for an already-paired directory.
-const DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || 'https://api.literati.ai';
+const DEFAULT_SERVER_URL = normalizeServerUrl(process.env.LITERATI_SERVER_URL) || 'https://api.literati.ai';
 const EXECUTE_TIMEOUT_MS = 9 * 60_000; // compile can be slow
 
 const LOGIN_TOOL = {
@@ -58,7 +62,7 @@ const LOGIN_TOOL = {
     properties: {
       project_url: {
         type: 'string',
-        description: 'Optional. The Literati project URL (…/project/<id>) or bare project id/slug. Preselects the project in the desktop app.',
+        description: 'Optional. The Literati project URL (…/project/<id>) or bare project id/slug. Preselects the project in the desktop app. Ignored when `code` is given (the project was chosen on the pairing page).',
       },
       code: {
         type: 'string',
@@ -185,13 +189,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
 });
 
-const PASTE = 'call literati_login again with it as `code`';
+const PASTE = 'call literati_login again with that code as `code`';
 const pairPageOr = async (serverUrl) => (await fetchPairPageUrl(serverUrl)) ?? "the Literati web app's pairing page (/pair)";
 
 async function handleLogin(args, signal) {
   const projectUrl = String(args?.project_url ?? '').trim();
-  // A code put in the project field is still a code (login.mjs does the same).
-  const code = String(args?.code ?? (isPairingCode(projectUrl) ? projectUrl : '')).trim();
+  // A code put in the project field is still a code (login.mjs does the
+  // same), and a blank `code` counts as none.
+  const code = String(args?.code ?? '').trim() || (isPairingCode(projectUrl) ? projectUrl : '');
   const serverUrl = DEFAULT_SERVER_URL;
   const requesterLabel = `${os.userInfo().username}@${os.hostname()}`;
 
@@ -200,19 +205,23 @@ async function handleLogin(args, signal) {
   if (code) {
     if (!isPairingCode(code)) {
       return text(
-        `That doesn't look like a Literati pairing code (8 letters and digits, e.g. K7QM2XPT). Ask the user to copy it from the pairing page, then ${PASTE}.`,
+        `That doesn't look like a Literati pairing code (${CODE_SHAPE}). Ask the user to copy it from the pairing page, then ${PASTE}.`,
         true,
       );
     }
     const r = await exchangePairingCode({ serverUrl, code, cwd: process.cwd(), headers: clientHeaders() });
     if (!r.ok) {
-      // Unreachable or rate-limited: the code is still good, so retry it;
-      // anything else means the code is spent and only a new one will do.
-      const next =
-        r.reason === 'network' || r.reason === 'rate_limited'
-          ? `Then ${PASTE} — the same code.`
-          : `Ask the user to create a new code at ${await pairPageOr(serverUrl)}, then ${PASTE}.`;
-      return text(`${r.message} ${next}`, true);
+      // What the code is still good for decides the next step (see
+      // exchangePairingCode): the same one again, a check before retyping it,
+      // a new one, or nothing a code can fix.
+      let next = '';
+      if (RETRY_SAME_CODE.has(r.reason)) next = 'Then call literati_login with the same `code`.';
+      else if (r.reason === 'invalid_code') {
+        next = `Ask the user to check the code, then call literati_login again with it as \`code\`; only if it expired or was already used, they create a new one at ${await pairPageOr(serverUrl)} first.`;
+      } else if (!NO_NEXT_STEP.has(r.reason)) {
+        next = `Ask the user to create a new code at ${await pairPageOr(serverUrl)}, then ${PASTE}.`;
+      }
+      return text(next ? `${r.message} ${next}` : r.message, true);
     }
     return finishLogin(r.body);
   }

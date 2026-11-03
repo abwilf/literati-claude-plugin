@@ -157,7 +157,7 @@ const WELCOME_BANNER = `Welcome to the Literati for Claude Code plugin! 🎉
 
 This plugin lets you work on Literati research project files right from Claude Code - read and edit your LaTeX files, compile and debug the PDF, search for and add papers to your bibliography, stage and commit, all synced in real time and viewable by yourself and your collaborators on the web & desktop apps. Claude operates on your behalf - each edit appears as your own. This should feel like using Claude Code on your own filesystem, but have all the benefits of real-time collaboration that Literati offers on the server side.
 
-To get connected, run /literati:login. Claude will register the Literati tools and kick off the login: a Literati window opens where you pick the project and click Accept (with the Literati desktop app — download it from https://literati.ai/download — or, on a machine without it, with a code from the Literati web app's pairing page). Claude tells you when to restart. Logins are directory-specific: pair each project directory once.
+To get connected, run /literati:login. Claude registers the Literati tools and starts the login. With the Literati desktop app (download: https://literati.ai/download) a Literati window opens — pick the project and click Accept. On a machine without the app, create a code on the Literati web app's pairing page and run /literati:login <code>. Claude tells you when to restart. Logins are directory-specific: pair each project directory once.
 
 This message only appears once. Claude can answer any additional questions you have about how to use it.`;
 

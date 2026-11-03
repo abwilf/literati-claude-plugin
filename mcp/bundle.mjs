@@ -16045,6 +16045,7 @@ var DEEP_LINK = "literati://cli-pair";
 var normalizeServerUrl = (u) => String(u ?? "").replace(/\/+$/, "");
 var CODE_RE = /^[A-HJ-NP-Z2-9]{8}$/;
 var normalizeCode = (code) => String(code ?? "").trim().toUpperCase();
+var CODE_SHAPE = "8 characters from A\u2013Z and 2\u20139, never 0, O, 1 or I";
 function isPairingCode(input) {
   return CODE_RE.test(normalizeCode(input));
 }
@@ -16071,55 +16072,93 @@ async function exchangePairingCode({ serverUrl, requestId, code, cwd, headers = 
       signal: AbortSignal.timeout(15e3)
     });
   } catch (err) {
-    return { ok: false, reason: "network", message: `Could not reach the Literati server: ${err.message}` };
+    const why = err.name === "TimeoutError" ? "timed out" : err.cause?.code ?? err.message;
+    return { ok: false, reason: "network", message: `Could not reach the Literati server: ${why}.` };
   }
   if (!res.ok) {
     const body2 = await res.json().catch(() => ({}));
-    if (body2?.code === "PAIRING_INVALID_CODE") {
+    const code2 = body2?.code;
+    if (res.status >= 500) {
+      return {
+        ok: false,
+        reason: "server_error",
+        message: `Literati's server returned an error (HTTP ${res.status}). Try again in a minute.`
+      };
+    }
+    if (code2 === "PAIRING_INVALID_CODE") {
       return {
         ok: false,
         reason: "invalid_code",
         message: byCode ? "That code is not correct, or it expired or was already used (codes last 10 minutes and work once)." : "That code is not correct."
       };
     }
-    if (body2?.code === "CLI_TOKEN_LIMIT") {
+    if (code2 === "CLI_TOKEN_LIMIT") {
       return {
         ok: false,
-        reason: "terminal",
-        message: "This account has too many CLI tokens. Revoke an old one in the Literati app (Settings \u2192 CLI & agent tokens), then pair again."
+        reason: "token_limit",
+        message: "This account has too many CLI tokens. Revoke an old one in the Literati app (Settings \u2192 CLI & agent tokens)."
       };
     }
-    if (body2?.code === "PAIRING_CODE_AMBIGUOUS") {
-      return { ok: false, reason: "terminal", message: "That code is not unique \u2014 create a new code on the pairing page." };
+    if (code2 === "PAIRING_CODE_AMBIGUOUS") {
+      return { ok: false, reason: "terminal", message: "That code is not unique." };
     }
-    if (byCode && body2?.code === "PAIRING_NOT_EXCHANGEABLE") {
-      return { ok: false, reason: "terminal", message: "That code was already used or cancelled. Create a new code." };
+    if (byCode && code2 === "PAIRING_NOT_EXCHANGEABLE") {
+      return { ok: false, reason: "terminal", message: "That code was already used or cancelled." };
     }
-    if (res.status === 429 && body2?.code === "RATE_LIMITED") {
-      const wait = typeof body2.retryAfterSeconds === "number" ? `${body2.retryAfterSeconds} seconds` : "a few minutes";
+    if (res.status === 429 && code2 !== "PAIRING_TOO_MANY_ATTEMPTS") {
+      const seconds = typeof body2?.retryAfterSeconds === "number" ? body2.retryAfterSeconds : Number(res.headers.get("retry-after"));
+      const wait = seconds > 0 ? `${seconds} seconds` : "a few minutes";
       return { ok: false, reason: "rate_limited", message: `Too many pairing attempts right now. Try again in ${wait}.` };
+    }
+    if (code2 === "PAIRING_PROJECT_GONE") {
+      return {
+        ok: false,
+        reason: "project_gone",
+        message: byCode ? "The project this code was for no longer exists. Pick another project on the pairing page and create a new code." : "The project you picked no longer exists."
+      };
+    }
+    if (byCode && res.status === 404 && !code2) {
+      return {
+        ok: false,
+        reason: "unsupported_server",
+        message: `This Literati server (${serverUrl}) does not support pairing codes: it needs an update, or LITERATI_SERVER_URL is not the Literati API. Until it is updated, only the Literati desktop app can pair with it (download: https://literati.ai/download).`
+      };
     }
     return {
       ok: false,
       reason: "terminal",
-      message: byCode ? "Pairing could not be completed. Create a new code." : "Pairing could not be completed (expired, denied, or too many attempts)."
+      message: byCode ? `Pairing could not be completed (HTTP ${res.status}: the request is gone, or it had too many attempts).` : "Pairing could not be completed (expired, denied, or too many attempts)."
     };
   }
-  const body = await res.json();
-  addProjectCredential(
-    {
-      serverUrl,
-      token: body.token,
-      collectionId: body.collectionId,
-      workspaceId: body.workspaceId,
-      userId: body.userId,
-      projectSlug: body.projectSlug,
-      projectName: body.projectName
-    },
-    cwd
-  );
+  const body = await res.json().catch(() => null);
+  const has = (field) => typeof body?.[field] === "string" && body[field] !== "";
+  if (!body || typeof body !== "object" || !has("token") || !has("collectionId") || !has("projectName")) {
+    return { ok: false, reason: "server_error", message: "Literati's server sent an unexpected reply. Try again in a minute." };
+  }
+  try {
+    addProjectCredential(
+      {
+        serverUrl,
+        token: body.token,
+        collectionId: body.collectionId,
+        workspaceId: body.workspaceId,
+        userId: body.userId,
+        projectSlug: body.projectSlug,
+        projectName: body.projectName
+      },
+      cwd
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "terminal",
+      message: `Paired, but the credential could not be saved: ${err.message}. ${byCode ? "The code is spent; fix that first." : "Fix that first."}`
+    };
+  }
   return { ok: true, body };
 }
+var RETRY_SAME_CODE = /* @__PURE__ */ new Set(["network", "server_error", "rate_limited", "token_limit"]);
+var NO_NEXT_STEP = /* @__PURE__ */ new Set(["unsupported_server", "project_gone"]);
 function requestSignal(outer, timeoutMs) {
   const timeout = AbortSignal.timeout(timeoutMs);
   if (!outer) return timeout;
@@ -16292,15 +16331,17 @@ async function desktopPair({
   await cancelPair(connectorUrl, pairId, client);
   return { kind: "timeout" };
 }
-function pairByCodeHint({ pairUrl, paste }) {
+function pairByCodeHint({ pairUrl, paste }, lead = "Or pair without the app") {
   const page = pairUrl ? `open ${pairUrl}` : "open the Literati web app's pairing page (/pair)";
-  return `Or pair without the app: ${page} in a browser where the user is signed in to Literati, pick the project, and ${paste}.`;
+  return `${lead}: ${page} in a browser where the user is signed in to Literati, pick the project, type a machine name and copy the 8-character code it shows, then ${paste}.`;
 }
 function desktopOutcomeMessage(outcome, retry, byCode) {
   const alt = byCode ? ` ${pairByCodeHint(byCode)}` : "";
   switch (outcome.kind) {
-    case "unavailable":
-      return `The Literati desktop app isn't installed, couldn't be started, or is too old for CLI pairing. Download the latest from https://literati.ai/download, open it and sign in, then ${retry}.${alt}`;
+    case "unavailable": {
+      const way = byCode ? `${pairByCodeHint(byCode, "Pair without it")} Or install the app:` : "Install it:";
+      return `No Literati desktop app found (not installed, couldn't be started, or too old for CLI pairing). ${way} download the latest from https://literati.ai/download, open it and sign in, then ${retry}.`;
+    }
     case "server_mismatch":
       return `The Literati desktop app is connected to ${outcome.appServerUrl}, but this plugin talks to ${outcome.serverUrl}. Point both at the same server (the plugin reads LITERATI_SERVER_URL when it starts), then ${retry}.${alt}`;
     case "signed_out":
@@ -16324,7 +16365,7 @@ function desktopOutcomeMessage(outcome, retry, byCode) {
 
 // index.mjs
 var activeCredential = () => getCredentialForDir(process.cwd());
-var DEFAULT_SERVER_URL = process.env.LITERATI_SERVER_URL || "https://api.literati.ai";
+var DEFAULT_SERVER_URL = normalizeServerUrl(process.env.LITERATI_SERVER_URL) || "https://api.literati.ai";
 var EXECUTE_TIMEOUT_MS = 9 * 6e4;
 var LOGIN_TOOL = {
   name: "literati_login",
@@ -16334,7 +16375,7 @@ var LOGIN_TOOL = {
     properties: {
       project_url: {
         type: "string",
-        description: "Optional. The Literati project URL (\u2026/project/<id>) or bare project id/slug. Preselects the project in the desktop app."
+        description: "Optional. The Literati project URL (\u2026/project/<id>) or bare project id/slug. Preselects the project in the desktop app. Ignored when `code` is given (the project was chosen on the pairing page)."
       },
       code: {
         type: "string",
@@ -16422,24 +16463,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   }
   return { tools };
 });
-var PASTE = "call literati_login again with it as `code`";
+var PASTE = "call literati_login again with that code as `code`";
 var pairPageOr = async (serverUrl) => await fetchPairPageUrl(serverUrl) ?? "the Literati web app's pairing page (/pair)";
 async function handleLogin(args, signal) {
   const projectUrl = String(args?.project_url ?? "").trim();
-  const code = String(args?.code ?? (isPairingCode(projectUrl) ? projectUrl : "")).trim();
+  const code = String(args?.code ?? "").trim() || (isPairingCode(projectUrl) ? projectUrl : "");
   const serverUrl = DEFAULT_SERVER_URL;
   const requesterLabel = `${os.userInfo().username}@${os.hostname()}`;
   if (code) {
     if (!isPairingCode(code)) {
       return text(
-        `That doesn't look like a Literati pairing code (8 letters and digits, e.g. K7QM2XPT). Ask the user to copy it from the pairing page, then ${PASTE}.`,
+        `That doesn't look like a Literati pairing code (${CODE_SHAPE}). Ask the user to copy it from the pairing page, then ${PASTE}.`,
         true
       );
     }
     const r = await exchangePairingCode({ serverUrl, code, cwd: process.cwd(), headers: clientHeaders() });
     if (!r.ok) {
-      const next = r.reason === "network" || r.reason === "rate_limited" ? `Then ${PASTE} \u2014 the same code.` : `Ask the user to create a new code at ${await pairPageOr(serverUrl)}, then ${PASTE}.`;
-      return text(`${r.message} ${next}`, true);
+      let next = "";
+      if (RETRY_SAME_CODE.has(r.reason)) next = "Then call literati_login with the same `code`.";
+      else if (r.reason === "invalid_code") {
+        next = `Ask the user to check the code, then call literati_login again with it as \`code\`; only if it expired or was already used, they create a new one at ${await pairPageOr(serverUrl)} first.`;
+      } else if (!NO_NEXT_STEP.has(r.reason)) {
+        next = `Ask the user to create a new code at ${await pairPageOr(serverUrl)}, then ${PASTE}.`;
+      }
+      return text(next ? `${r.message} ${next}` : r.message, true);
     }
     return finishLogin(r.body);
   }
