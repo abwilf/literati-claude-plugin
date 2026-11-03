@@ -15511,7 +15511,7 @@ function getCredentialForDir(dir) {
 
 // tool-catalog.json
 var tool_catalog_default = {
-  generatedAt: "2026-10-06",
+  generatedAt: "2026-10-26",
   tools: [
     {
       name: "list_papers",
@@ -15594,6 +15594,23 @@ var tool_catalog_default = {
         },
         required: [
           "input"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "download_pdfs",
+      description: "Download the PDFs of papers that are already in the ACTIVE PROJECT, through the user's Literati desktop app and browser extension (which fetch from publisher sites with the user's own access). Pass citation keys or paper ids. This tool only QUEUES the downloads: it returns at once, never reports whether a download succeeded, and a PDF is not readable until it lands. Papers that already have a PDF are skipped. Call it ONCE, right after add_paper, for the papers whose add_paper result did NOT already say their PDF is being fetched \u2014 never call it again for the same papers (not to retry, not to check progress). If the user declines, tell them they can download PDFs from the Library later.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          papers: {
+            type: "string",
+            description: "Citation keys or paper ids of papers in this project, one per line (commas also work)."
+          }
+        },
+        required: [
+          "papers"
         ],
         additionalProperties: false
       }
@@ -15792,6 +15809,35 @@ var tool_catalog_default = {
       }
     },
     {
+      name: "inspect",
+      description: "Look at one page of this project's compiled PDF and ask a specific question about it (figure/table placement, clipped or overfull content, how an equation or layout renders, what a page contains). Pass either page (1-based), or file_path + line to see the page where that source line was typeset (mapped via SyncTeX). A separate vision model sees the page image and returns only a text answer; the image never enters this conversation and every call is independent with no memory, so put all needed context into question. If the compiled PDF is missing or older than the source files, the project is compiled on the server first (this can take a minute).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "What to look for on the page, with all the context the vision model needs (it has no memory of earlier calls)."
+          },
+          page: {
+            type: "number",
+            description: "1-based page number to look at. Mutually exclusive with file_path + line."
+          },
+          file_path: {
+            type: "string",
+            description: "Project-relative path (or bare name) of a source file; with line, selects the page where that line was typeset."
+          },
+          line: {
+            type: "number",
+            description: "1-based line in file_path. Required with file_path."
+          }
+        },
+        required: [
+          "question"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
       name: "scan_bib_arxiv",
       description: "Scan the active collection's custom .bib files (zip-imported or hand-made \u2014 NOT the synthesized literati.bib) for actively-cited arxiv references that are not yet in the managed library, and report them. Read-only \u2014 it changes nothing. Call it when the user asks to migrate/clean up/check their bibliography, or when the system prompt says a bib-migration check is pending. The result includes step-by-step migration instructions; adding the papers and then moving/renaming/recompiling each require the user's explicit agreement first.",
       inputSchema: {
@@ -15890,6 +15936,45 @@ var tool_catalog_default = {
         },
         required: [
           "file_path",
+          "new_path"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "create_folder",
+      description: 'Create a folder in the Literati project. Give a project-relative path; parent segments that do not exist yet are created too (e.g. "Sections/Methods"). Move files into it with rename_file.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          folder_path: {
+            type: "string",
+            description: 'Project-relative folder path to create (e.g. "Sections" or "Sections/Methods"). Existing segments are reused, case-insensitively.'
+          }
+        },
+        required: [
+          "folder_path"
+        ],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "rename_folder",
+      description: 'Rename a folder in the Literati project, or move it by giving a new path under a different existing folder (e.g. "Sections/Figures"). Everything inside moves with it. Folders cannot be created by rename_folder \u2014 use create_folder.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          folder_path: {
+            type: "string",
+            description: 'Existing folder \u2014 a project-relative path (e.g. "Figures" or "Sections/Sub").'
+          },
+          new_path: {
+            type: "string",
+            description: 'New folder name, optionally prefixed with an existing folder path to move it (e.g. "Images" or "Sections/Figures"). No prefix moves/keeps it at the collection root.'
+          }
+        },
+        required: [
+          "folder_path",
           "new_path"
         ],
         additionalProperties: false
